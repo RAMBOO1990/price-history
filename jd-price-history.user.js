@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         京东历史价格 - 慢慢买查价
-// @namespace    https://github.com/ramboo1990/jd-price-history
+// @namespace    https://github.com/ramboo1990/price-history
 // @version      1.0
 // @description  京东商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
