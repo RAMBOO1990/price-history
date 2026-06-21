@@ -58,6 +58,18 @@ Authorization: BasicAuth D8DD2812A942...
 
 在 `init()` 中自动检测当前平台，未命中任一平台则不激活脚本。
 
+### 数据源架构
+
+通过 `DATASOURCES` 数组支持多数据源，每项定义：
+- `name` / `id` — 显示名与标识
+- `cookieKey` / `secretKey` — 存储键名
+- `getCookie` / `setCookie` / `clearCookie` — Cookie 管理
+- `getSecret` / `setSecret` / `getSecretTime` — 密钥管理
+- `fetchData(productUrl)` — 返回 `Promise<{ data, meta }>` 的核心接口
+- `updateSecret()` — 在线更新密钥
+
+在 `init()` 中默认使用第一个数据源（`DATASOURCES[0]`）。设置面板自动遍历所有数据源生成配置区块。
+
 ### 图表渲染
 
 参考 `https://mmbres.manmanbuy.com/pc_tool/echartsTrend.js`

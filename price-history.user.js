@@ -32,13 +32,8 @@
         animDuration: 300,
     };
 
-    const MMB_COOKIE_KEY = 'ph.mmb.cookie';
-    const MMB_SECRET_KEY = 'ph.mmb.secret';
-    const MMB_SECRET_TIME_KEY = 'ph.mmb.secret_time';
-    const MMB_SECRET_DEFAULT = 'c5c3f201a8e8fc634d37a766a0299218';
     const BTN_HIDDEN_KEY = 'ph.btn.hidden';
     const ELEVATOR_HIDDEN_KEY = 'ph.elevator.hidden';
-    const MMB_URL = 'https://tool.manmanbuy.com/HistoryLowest.aspx?url=';
 
     /* ============================================================
      *  平台配置
@@ -57,6 +52,159 @@
         },
     ];
     var currentPlatform = null;
+
+    /* ============================================================
+     *  数据源配置
+     * ============================================================ */
+    var DATASOURCES = [
+        {
+            name: '慢慢买',
+            id: 'mmb',
+            cookieKey: 'ph.mmb.cookie',
+            secretKey: 'ph.mmb.secret',
+            secretTimeKey: 'ph.mmb.secret_time',
+            secretDefault: 'c5c3f201a8e8fc634d37a766a0299218',
+            cookieUrl: 'https://tool.manmanbuy.com',
+            homepageUrl: 'https://tool.manmanbuy.com/',
+            getCookie: function () { return GM_getValue(this.cookieKey, ''); },
+            setCookie: function (c) { GM_setValue(this.cookieKey, c); },
+            clearCookie: function () { GM_deleteValue(this.cookieKey); },
+            getSecret: function () { return GM_getValue(this.secretKey, this.secretDefault); },
+            setSecret: function (v) { GM_setValue(this.secretKey, v); GM_setValue(this.secretTimeKey, Date.now()); },
+            getSecretTime: function () { return GM_getValue(this.secretTimeKey, 0); },
+
+            _rc4Decrypt: function (encoded, key) {
+                var raw = atob(encoded), urlEnc = '';
+                for (var i = 0; i < raw.length; i++) { urlEnc += '%' + ('00' + raw.charCodeAt(i).toString(16)).slice(-2); }
+                var str = decodeURIComponent(urlEnc);
+                var s = [], j = 0, t;
+                for (var i = 0; i < 256; i++) s[i] = i;
+                for (var i = 0; i < 256; i++) { j = (j + s[i] + key.charCodeAt(i % key.length)) % 256; t = s[i]; s[i] = s[j]; s[j] = t; }
+                var r = '';
+                for (var i = 0, j = 0, k = 0; k < str.length; k++) {
+                    i = (i + 1) % 256; j = (j + s[i]) % 256; t = s[i]; s[i] = s[j]; s[j] = t;
+                    r += String.fromCharCode(str.charCodeAt(k) ^ s[(s[i] + s[j]) % 256]);
+                }
+                return r;
+            },
+
+            _deobfuscate: function (jsText) {
+                var m = jsText.match(/__0xa3e63\s*=\s*\[(.*?)\];/);
+                if (!m) throw new Error('无法解混淆: 未找到加密数组');
+                var rawElements = m[1].match(/'[^']*'/g);
+                if (!rawElements) throw new Error('无法解混淆: 数组元素为空');
+                var elements = rawElements.map(function (e) { return e.slice(1, -1); });
+                for (var i = 0; i < 476; i++) { elements.push(elements.shift()); }
+                return this._rc4Decrypt(elements[0], 'teCD');
+            },
+
+            _generateToken: function (params, productUrl) {
+                var secret = this.getSecret();
+                var p = { method: params.method, key: productUrl };
+                p.t = Date.now();
+                var keys = Object.keys(p).sort();
+                var str = secret;
+                for (var i = 0; i < keys.length; i++) {
+                    var k = keys[i];
+                    if (p[k] != null && p[k] !== '') { str += encodeURIComponent(k) + encodeURIComponent(p[k]); }
+                }
+                str += secret;
+                str = str.toUpperCase();
+                p.token = md5(str);
+                return p;
+            },
+
+            fetchData: function (productUrl) {
+                var self = this;
+                var cookie = self.getCookie();
+                var pageUrl = 'https://tool.manmanbuy.com/HistoryLowest.aspx?url=' + encodeURIComponent(productUrl);
+
+                return syncRequest({
+                    method: 'GET',
+                    url: pageUrl,
+                    headers: { 'Cookie': cookie, 'User-Agent': navigator.userAgent },
+                }).then(function (pageRes) {
+                    if (pageRes.status !== 200) throw { message: '页面加载失败', canRetry: true };
+                    var html = pageRes.responseText;
+                    if (pageRes.responseHeaders) {
+                        var scm = pageRes.responseHeaders.match(/set-cookie[^:]*:\s*([^\r\n]+)/i);
+                        if (scm) {
+                            var extra = scm[1].split(';')[0];
+                            if (cookie.indexOf(extra.split('=')[0]) === -1) {
+                                cookie = (cookie ? cookie + '; ' : '') + extra;
+                                console.log('[ph] 合并了新Cookie:', extra.split('=')[0]);
+                            }
+                        }
+                    }
+                    var m = html.match(/id="ticket" value="([^"]+)"/);
+                    if (!m) throw { message: '无法获取票据，请确认Cookie是否有效', canRetry: true };
+                    var ticket = m[1];
+                    console.log('[ph] 原始ticket:', ticket);
+                    if (ticket.length > 4) ticket = ticket.substr(ticket.length - 4, 4) + ticket.substr(0, ticket.length - 4);
+                    console.log('[ph] 转换后ticket:', ticket);
+
+                    var apiParams = self._generateToken({ method: 'getHistoryTrend' }, productUrl);
+                    var postData = 'method=' + encodeURIComponent(apiParams.method) + '&key=' + encodeURIComponent(apiParams.key) + '&t=' + apiParams.t + '&token=' + apiParams.token;
+                    console.log('[ph] POST数据: t=' + apiParams.t + ' token=' + apiParams.token);
+
+                    return syncRequest({
+                        method: 'POST',
+                        url: 'https://tool.manmanbuy.com/api.ashx',
+                        data: postData,
+                        headers: {
+                            'Cookie': cookie,
+                            'Authorization': 'BasicAuth ' + ticket,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'User-Agent': navigator.userAgent,
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Referer': pageUrl,
+                        },
+                    }).then(function (apiRes) {
+                        var ret = JSON.parse(apiRes.responseText);
+                        if (ret.code !== 0 || !ret.data || !ret.data.datePrice) {
+                            console.log('[ph] API 响应:', apiRes.responseText);
+                            console.log('[ph] ticket:', ticket);
+                            throw { message: (ret.msg || '暂无价格数据') + ' (code=' + ret.code + ')', canRetry: true };
+                        }
+                        console.log('[ph] 价格数据获取成功!');
+                        console.log('[ph] 商品:', ret.data.spName);
+                        console.log('[ph] 当前价:', ret.data.currentPrice);
+                        console.log('[ph] 历史最低:', ret.data.lowerPrice, ret.data.lowerDate);
+                        console.log('[ph] 价格点数:', ret.data.datePrice.split('],[').length);
+                        var rawData = eval('([' + ret.data.datePrice + '])');
+                        var prices = rawData.map(function (d) { return d[1]; });
+                        return {
+                            data: rawData,
+                            meta: {
+                                current: prices[prices.length - 1],
+                                highest: Math.max.apply(null, prices),
+                                lowest: Math.min.apply(null, prices),
+                            },
+                        };
+                    });
+                });
+            },
+
+            updateSecret: function () {
+                var self = this;
+                return new Promise(function (resolve, reject) {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: 'https://mmbres.manmanbuy.com/pc_tool/customRequest.js',
+                        onload: function (res) {
+                            try {
+                                var secret = self._deobfuscate(res.responseText);
+                                self.setSecret(secret);
+                                resolve(secret);
+                            } catch (e) { reject(e); }
+                        },
+                        onerror: function () { reject(new Error('请求 customRequest.js 失败')); },
+                    });
+                });
+            },
+        },
+    ];
+    var currentDataSource = null;
 
     /* ============================================================
      *  URL 处理
@@ -295,7 +443,7 @@
         '.ph-settings-row:last-child { border-bottom:none; }',
         '.ph-settings-row label { font-size:13px;color:#333;cursor:pointer; }',
 
-        // ---- 动态隐藏 JD 电梯 ----
+        // ---- 动态隐藏电梯 ----
         '#ph-elevator-style { display:none; }',
 
     ].join('\n');
@@ -459,87 +607,6 @@
         return u;
     })();
 
-    function getSecret() { return GM_getValue(MMB_SECRET_KEY, MMB_SECRET_DEFAULT); }
-    function setSecret(v) { GM_setValue(MMB_SECRET_KEY, v); GM_setValue(MMB_SECRET_TIME_KEY, Date.now()); }
-
-    function generateToken(params) {
-        var secret = getSecret();
-        var p = {};
-        for (var k in params) p[k] = params[k];
-        p.t = Date.now();
-        var keys = Object.keys(p).sort();
-        var str = secret;
-        for (var i = 0; i < keys.length; i++) {
-            var key = keys[i];
-            if (p[key] != null && p[key] !== '') {
-                str += encodeURIComponent(key) + encodeURIComponent(p[key]);
-            }
-        }
-        str += secret;
-        str = str.toUpperCase();
-        p.token = md5(str);
-        return p;
-    }
-
-    /* ============================================================
-     *  RC4 / 反混淆（用于从 customRequest.js 提取 secret）
-     * ============================================================ */
-    function rc4Decrypt(encoded, key) {
-        var raw = atob(encoded), urlEnc = '';
-        for (var i = 0; i < raw.length; i++) {
-            urlEnc += '%' + ('00' + raw.charCodeAt(i).toString(16)).slice(-2);
-        }
-        var str = decodeURIComponent(urlEnc);
-        var s = [], j = 0, t;
-        for (var i = 0; i < 256; i++) s[i] = i;
-        for (var i = 0; i < 256; i++) {
-            j = (j + s[i] + key.charCodeAt(i % key.length)) % 256;
-            t = s[i]; s[i] = s[j]; s[j] = t;
-        }
-        var result = '';
-        for (var i = 0, j = 0, k = 0; k < str.length; k++) {
-            i = (i + 1) % 256;
-            j = (j + s[i]) % 256;
-            t = s[i]; s[i] = s[j]; s[j] = t;
-            result += String.fromCharCode(str.charCodeAt(k) ^ s[(s[i] + s[j]) % 256]);
-        }
-        return result;
-    }
-
-    function deobfuscateCustomRequest(jsText) {
-        var m = jsText.match(/__0xa3e63\s*=\s*\[(.*?)\];/);
-        if (!m) throw new Error('无法解混淆: 未找到加密数组');
-        var rawElements = m[1].match(/'[^']*'/g);
-        if (!rawElements) throw new Error('无法解混淆: 数组元素为空');
-        var elements = rawElements.map(function(e) { return e.slice(1, -1); });
-        for (var i = 0; i < 476; i++) { elements.push(elements.shift()); }
-        return rc4Decrypt(elements[0], 'teCD');
-    }
-
-    function fetchSecret() {
-        return new Promise(function(resolve, reject) {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: 'https://mmbres.manmanbuy.com/pc_tool/customRequest.js',
-                onload: function(res) {
-                    try {
-                        var secret = deobfuscateCustomRequest(res.responseText);
-                        setSecret(secret);
-                        resolve(secret);
-                    } catch (e) { reject(e); }
-                },
-                onerror: function() { reject(new Error('请求 customRequest.js 失败')); },
-            });
-        });
-    }
-
-    /* ============================================================
-     *  Cookie 管理
-     * ============================================================ */
-    function getCookie() { return GM_getValue(MMB_COOKIE_KEY, ''); }
-    function setCookie(c) { GM_setValue(MMB_COOKIE_KEY, c); }
-    function clearCookie() { GM_deleteValue(MMB_COOKIE_KEY); }
-
     /* ============================================================
      *  设置弹窗
      * ============================================================ */
@@ -567,7 +634,7 @@
 
     function showSettings() {
         if (!settingsEl) {
-            settingsEl = el('div', { id: 'ph-settings' }, [
+            var children = [
                 el('div', { id: 'ph-settings-header' }, [
                     el('h2', null, ['设置']),
                     el('button', { id: 'ph-settings-close', className: 'ph-icon-btn', title: '关闭' }, ['\u00d7']),
@@ -582,98 +649,125 @@
                         ]),
                     ]),
                     el('div', { className: 'ph-settings-row' }, [
-                        el('label', { htmlFor: 'ph-toggle-elevator' }, ['隐藏京东楼层导航']),
+                        el('label', { htmlFor: 'ph-toggle-elevator' }, ['隐藏平台楼层导航']),
                         el('label', { className: 'ph-switch' }, [
                             el('input', { type: 'checkbox', id: 'ph-toggle-elevator' }),
                             el('span', { className: 'ph-slider' }),
                         ]),
                     ]),
                 ]),
-                el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }),
-                el('div', { className: 'ph-settings-section' }, [
-                    el('div', { className: 'ph-settings-section-title' }, ['Cookie']),
+            ];
+
+            // 数据源配置面板
+            for (var d = 0; d < DATASOURCES.length; d++) {
+                var ds = DATASOURCES[d];
+                var pid = 'ds-' + ds.id;
+
+                children.push(el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }));
+                children.push(el('div', { className: 'ph-settings-section', 'data-ds': ds.id }, [
+                    el('div', { className: 'ph-settings-section-title' }, [ds.name + ' Cookie']),
                     el('p', { className: 'ph-settings-desc' }, [
                         '获取方式：打开 ',
-                        el('code', null, ['https://tool.manmanbuy.com']),
+                        el('code', null, [ds.cookieUrl]),
                         '，F12 \u2192 Console，执行 ',
                         el('code', null, ["copy(document.cookie)"]),
                         ' 粘贴到下方。',
                     ]),
-                    el('textarea', { id: 'ph-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
+                    el('textarea', { id: pid + '-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
                     el('div', { className: 'ph-settings-actions' }, [
-                        el('button', { className: 'ph-btn-primary', id: 'ph-save-cookie' }, ['保存']),
-                        el('button', { className: 'ph-btn-secondary', id: 'ph-clear-cookie' }, ['清除']),
+                        el('button', { className: 'ph-btn-primary', id: pid + '-save-cookie' }, ['保存']),
+                        el('button', { className: 'ph-btn-secondary', id: pid + '-clear-cookie' }, ['清除']),
                     ]),
-                ]),
-                el('div', { className: 'ph-settings-status', id: 'ph-settings-status' }),
-                el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }),
-                el('div', { className: 'ph-settings-actions' }, [
-                    el('button', { className: 'ph-btn-secondary', id: 'ph-update-secret', style: 'flex:1' }, ['更新密钥']),
-                ]),
-                el('div', { id: 'ph-secret-info', style: 'font-size:11px;color:#aaa;text-align:center;margin-top:10px;line-height:1.6' }),
-            ]);
+                ]));
+
+                if (ds.secretKey) {
+                    children.push(el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }));
+                    children.push(el('div', { className: 'ph-settings-section', 'data-ds': ds.id }, [
+                        el('div', { className: 'ph-settings-section-title' }, [ds.name + ' 密钥']),
+                        el('div', { className: 'ph-settings-actions' }, [
+                            el('button', { className: 'ph-btn-secondary', id: pid + '-update-secret', style: 'flex:1' }, ['更新密钥']),
+                        ]),
+                        el('div', { id: pid + '-secret-info', style: 'font-size:11px;color:#aaa;text-align:center;margin-top:10px;line-height:1.6' }),
+                    ]));
+                }
+            }
+
+            children.push(el('div', { className: 'ph-settings-status', id: 'ph-settings-status' }));
+
+            settingsEl = el('div', { id: 'ph-settings' }, children);
             document.body.appendChild(settingsEl);
 
+            // 开关事件
             settingsEl.querySelector('#ph-toggle-btn').addEventListener('change', function () {
                 GM_setValue(BTN_HIDDEN_KEY, this.checked);
                 applyBtnVisibility();
             });
-
             settingsEl.querySelector('#ph-toggle-elevator').addEventListener('change', function () {
                 GM_setValue(ELEVATOR_HIDDEN_KEY, this.checked);
                 applyPlatformElevator();
             });
-
-            settingsEl.querySelector('#ph-save-cookie').addEventListener('click', function () {
-                var val = settingsEl.querySelector('#ph-cookie-input').value.trim();
-                if (!val) {
-                    showSettingsStatus('error', '请输入 Cookie');
-                    return;
-                }
-                setCookie(val);
-                showSettingsStatus('success', 'Cookie 已保存');
-                setTimeout(function () { hideSettings(); }, 1200);
-            });
-
-            settingsEl.querySelector('#ph-clear-cookie').addEventListener('click', function () {
-                clearCookie();
-                settingsEl.querySelector('#ph-cookie-input').value = '';
-                showSettingsStatus('success', 'Cookie 已清除');
-            });
-
             settingsEl.querySelector('#ph-settings-close').addEventListener('click', hideSettings);
 
-            settingsEl.querySelector('#ph-update-secret').addEventListener('click', function () {
-                var btn = this;
-                btn.textContent = '更新中...';
-                btn.disabled = true;
-                fetchSecret().then(function(secret) {
-                    showSettingsStatus('success', '密钥已更新');
-                    refreshSecretInfo();
-                    btn.textContent = '更新密钥';
-                    btn.disabled = false;
-                }).catch(function(err) {
-                    showSettingsStatus('error', '更新失败: ' + err.message);
-                    btn.textContent = '更新密钥';
-                    btn.disabled = false;
-                });
-            });
+            // 数据源事件
+            for (var d = 0; d < DATASOURCES.length; d++) {
+                (function (ds) {
+                    var pid = 'ds-' + ds.id;
+
+                    settingsEl.querySelector('#' + pid + '-save-cookie').addEventListener('click', function () {
+                        var val = settingsEl.querySelector('#' + pid + '-cookie-input').value.trim();
+                        if (!val) { showSettingsStatus('error', '请输入 Cookie'); return; }
+                        ds.setCookie(val);
+                        showSettingsStatus('success', ds.name + ' Cookie 已保存');
+                        setTimeout(function () { hideSettings(); }, 1200);
+                    });
+
+                    settingsEl.querySelector('#' + pid + '-clear-cookie').addEventListener('click', function () {
+                        ds.clearCookie();
+                        settingsEl.querySelector('#' + pid + '-cookie-input').value = '';
+                        showSettingsStatus('success', ds.name + ' Cookie 已清除');
+                    });
+
+                    if (ds.secretKey) {
+                        settingsEl.querySelector('#' + pid + '-update-secret').addEventListener('click', function () {
+                            var btn = this;
+                            btn.textContent = '更新中...';
+                            btn.disabled = true;
+                            ds.updateSecret().then(function () {
+                                showSettingsStatus('success', ds.name + ' 密钥已更新');
+                                refreshDsSecretInfo(ds);
+                                btn.textContent = '更新密钥';
+                                btn.disabled = false;
+                            }).catch(function (err) {
+                                showSettingsStatus('error', '更新失败: ' + (err.message || err));
+                                btn.textContent = '更新密钥';
+                                btn.disabled = false;
+                            });
+                        });
+                    }
+                })(DATASOURCES[d]);
+            }
         }
 
-        function refreshSecretInfo() {
-            var secret = getSecret();
-            var time = GM_getValue(MMB_SECRET_TIME_KEY, 0);
+        function refreshDsSecretInfo(ds) {
+            var secret = ds.getSecret();
+            var time = ds.getSecretTime();
             var timeStr = time ? dateFormat(new Date(time), 'yyyy-MM-dd HH:mm') : '未知';
-            var infoEl = settingsEl.querySelector('#ph-secret-info');
+            var infoEl = settingsEl.querySelector('#ds-' + ds.id + '-secret-info');
             if (infoEl) infoEl.innerHTML = '密钥: ' + secret.substring(0, 16) + '...<br>更新: ' + timeStr;
         }
 
-        refreshSecretInfo();
-
-        var existing = getCookie();
-        if (existing) {
-            settingsEl.querySelector('#ph-cookie-input').value = existing;
+        // 刷新所有数据源状态
+        for (var d = 0; d < DATASOURCES.length; d++) {
+            var ds = DATASOURCES[d];
+            var pid = 'ds-' + ds.id;
+            var existing = ds.getCookie();
+            if (existing) {
+                var input = settingsEl.querySelector('#' + pid + '-cookie-input');
+                if (input) input.value = existing;
+            }
+            if (ds.secretKey) refreshDsSecretInfo(ds);
         }
+
         settingsEl.querySelector('#ph-toggle-btn').checked = GM_getValue(BTN_HIDDEN_KEY, false);
         settingsEl.querySelector('#ph-toggle-elevator').checked = GM_getValue(ELEVATOR_HIDDEN_KEY, false);
 
@@ -726,9 +820,11 @@
 
         bodyEl = el('div', { id: 'ph-body' });
 
+        var dsName = currentDataSource ? currentDataSource.name : '';
+        var dsUrl = currentDataSource ? currentDataSource.homepageUrl : '#';
         var footer = el('div', { id: 'ph-footer' }, [
-            el('a', { href: 'https://tool.manmanbuy.com/', target: '_blank', rel: 'noopener' }, [
-                '数据来源：慢慢买 \u2197'
+            el('a', { href: dsUrl, target: '_blank', rel: 'noopener' }, [
+                '数据来源：' + dsName + ' \u2197'
             ]),
         ]);
 
@@ -759,7 +855,7 @@
         overlay.classList.add('active');
         panel.classList.add('open');
         // 没有 Cookie 时弹出设置
-        if (!getCookie()) {
+        if (!currentDataSource || !currentDataSource.getCookie()) {
             showSettings();
             return;
         }
@@ -902,13 +998,13 @@
         }
     }
 
-    function showFallback() {
+    function showFallback(url) {
         fetched = true;
         isLoading = false;
         bodyEl.innerHTML = '';
         bodyEl.style.display = 'block';
         var iframe = el('iframe', {
-            src: MMB_URL + encodeURIComponent(getCleanUrl()),
+            src: url,
             style: 'width:100%;flex:1;border:none;border-radius:6px;min-height:500px;',
             sandbox: 'allow-scripts allow-same-origin',
         });
@@ -919,85 +1015,18 @@
      *  数据获取与解析
      * ============================================================ */
     function fetchChart() {
+        if (!currentDataSource) { showError('未配置数据源', false); return; }
         showLoading();
-        var jdUrl = getCleanUrl();
-        var cookie = getCookie();
+        var url = getCleanUrl();
 
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: MMB_URL + encodeURIComponent(jdUrl),
-            headers: { 'Cookie': cookie, 'User-Agent': navigator.userAgent },
-            onload: function(pageRes) {
-                if (pageRes.status !== 200) { showError('页面加载失败', true); return; }
-                var html = pageRes.responseText;
-                // 捕获 Set-Cookie，合并到 cookie 中
-                if (pageRes.responseHeaders) {
-                    var setCookieMatch = pageRes.responseHeaders.match(/set-cookie[^:]*:\s*([^\r\n]+)/i);
-                    if (setCookieMatch) {
-                        var extraCookies = setCookieMatch[1].split(';')[0];
-                        if (cookie.indexOf(extraCookies.split('=')[0]) === -1) {
-                            cookie = (cookie ? cookie + '; ' : '') + extraCookies;
-                            console.log('[ph] 合并了新Cookie:', extraCookies.split('=')[0]);
-                        }
-                    }
-                }
-                // 提取 ticket
-                var m = html.match(/id="ticket" value="([^"]+)"/);
-                if (!m) { showError('无法获取票据，请确认Cookie是否有效', true); return; }
-                var ticket = m[1];
-                console.log('[ph] 原始ticket:', ticket);
-                if (ticket.length > 4) ticket = ticket.substr(ticket.length - 4, 4) + ticket.substr(0, ticket.length - 4);
-                console.log('[ph] 转换后ticket:', ticket);
-
-                // 调 API
-                var apiParams = generateToken({ method: 'getHistoryTrend', key: jdUrl });
-                var postData = 'method=' + encodeURIComponent(apiParams.method) + '&key=' + encodeURIComponent(apiParams.key) + '&t=' + apiParams.t + '&token=' + apiParams.token;
-                console.log('[ph] POST数据: t=' + apiParams.t + ' token=' + apiParams.token);
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: 'https://tool.manmanbuy.com/api.ashx',
-                    data: postData,
-                    headers: {
-                        'Cookie': cookie,
-                        'Authorization': 'BasicAuth ' + ticket,
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'User-Agent': navigator.userAgent,
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Referer': 'https://tool.manmanbuy.com/HistoryLowest.aspx?url=' + encodeURIComponent(jdUrl),
-                    },
-                    onload: function(apiRes) {
-                        try {
-                            var ret = JSON.parse(apiRes.responseText);
-                            if (ret.code !== 0 || !ret.data || !ret.data.datePrice) {
-                                console.log('[ph] API 响应:', apiRes.responseText);
-                                console.log('[ph] ticket:', ticket);
-                                showError((ret.msg || '暂无价格数据') + ' (code=' + ret.code + ')', true);
-                                return;
-                            }
-                            console.log('[ph] 价格数据获取成功!');
-                            console.log('[ph] 商品:', ret.data.spName);
-                            console.log('[ph] 当前价:', ret.data.currentPrice);
-                            console.log('[ph] 历史最低:', ret.data.lowerPrice, ret.data.lowerDate);
-                            console.log('[ph] 价格点数:', ret.data.datePrice.split('],[').length);
-                            // 解析 datePrice: "[ts1,p1,''],[ts2,p2,'']"
-                            var rawData = eval('([' + ret.data.datePrice + '])');
-                            var prices = rawData.map(function(d) { return d[1]; });
-                            var highest = Math.max.apply(null, prices);
-                            var lowest = Math.min.apply(null, prices);
-                            showChart(rawData, {
-                                current: prices[prices.length - 1],
-                                highest: highest,
-                                lowest: lowest
-                            });
-                        } catch(e) {
-                            showError('数据解析失败: ' + e.message, true);
-                        }
-                    },
-                    onerror: function() { showError('API请求失败，尝试iframe降级', false); showFallback(); },
-                });
-            },
-            onerror: function() { showError('页面请求失败，请检查Cookie', true); },
-            ontimeout: function() { showError('请求超时', true); },
+        currentDataSource.fetchData(url).then(function (result) {
+            showChart(result.data, result.meta);
+        }).catch(function (err) {
+            if (err.fallbackUrl) {
+                showFallback(err.fallbackUrl);
+            } else {
+                showError(err.message || '请求失败', err.canRetry !== false);
+            }
         });
     }
 
@@ -1017,6 +1046,8 @@
             }
         }
         if (!currentPlatform) return;
+        // 默认使用第一个数据源
+        if (DATASOURCES.length > 0) currentDataSource = DATASOURCES[0];
         buildUI();
     }
 
