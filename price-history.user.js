@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         京东历史价格 - 慢慢买查价
+// @name         历史价格 - 慢慢买查价
 // @namespace    https://github.com/ramboo1990/price-history
 // @version      1.1
-// @description  京东商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
+// @description  商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
 // @match        https://item.jd.com/*
 // @icon         https://www.jd.com/favicon.ico
@@ -32,20 +32,39 @@
         animDuration: 300,
     };
 
-    const MMB_COOKIE_KEY = 'jd-ph.mmb.cookie';
-    const MMB_SECRET_KEY = 'jd-ph.mmb.secret';
-    const MMB_SECRET_TIME_KEY = 'jd-ph.mmb.secret_time';
+    const MMB_COOKIE_KEY = 'ph.mmb.cookie';
+    const MMB_SECRET_KEY = 'ph.mmb.secret';
+    const MMB_SECRET_TIME_KEY = 'ph.mmb.secret_time';
     const MMB_SECRET_DEFAULT = 'c5c3f201a8e8fc634d37a766a0299218';
-    const BTN_HIDDEN_KEY = 'jd-ph.btn.hidden';
-    const JD_ELEVATOR_HIDDEN_KEY = 'jd-ph.elevator.hidden';
+    const BTN_HIDDEN_KEY = 'ph.btn.hidden';
+    const ELEVATOR_HIDDEN_KEY = 'ph.elevator.hidden';
     const MMB_URL = 'https://tool.manmanbuy.com/HistoryLowest.aspx?url=';
+
+    /* ============================================================
+     *  平台配置
+     * ============================================================ */
+    var PLATFORMS = [
+        {
+            name: '京东',
+            match: /item\.jd\.com\/\d+\.html/i,
+            getCleanUrl: function () {
+                var m = location.href.match(/^(https?:\/\/item\.jd\.com\/\d+\.html)/i);
+                if (m) return m[1];
+                return location.href.replace(/[?#].*$/, '');
+            },
+            elevatorSelector: '#elevator_from_common_component',
+            icon: 'https://www.jd.com/favicon.ico',
+        },
+    ];
+    var currentPlatform = null;
 
     /* ============================================================
      *  URL 处理
      * ============================================================ */
-    function getCleanJdUrl() {
-        var m = location.href.match(/^(https?:\/\/item\.jd\.com\/\d+\.html)/i);
-        if (m) return m[1];
+    function getCleanUrl() {
+        if (currentPlatform && currentPlatform.getCleanUrl) {
+            return currentPlatform.getCleanUrl();
+        }
         return location.href.replace(/[?#].*$/, '');
     }
 
@@ -54,18 +73,18 @@
      * ============================================================ */
     var css = [
         // ---- 遮罩 ----
-        '#jd-ph-overlay {',
+        '#ph-overlay {',
             'position:fixed;top:0;left:0;width:100%;height:100%;',
             'background:rgba(0,0,0,.45);z-index:999998;',
             'opacity:0;transition:opacity ' + CONFIG.animDuration + 'ms ease;',
             'pointer-events:none;',
         '}',
-        '#jd-ph-overlay.active {',
+        '#ph-overlay.active {',
             'opacity:1;pointer-events:auto;',
         '}',
 
         // ---- 浮动按钮 ----
-        '#jd-ph-btn {',
+        '#ph-btn {',
             'position:fixed;right:0;top:35%;z-index:999997;',
             'width:' + CONFIG.btnWidth + 'px;height:' + CONFIG.btnSize + 'px;',
             'background:' + CONFIG.color + ';color:#fff;',
@@ -74,24 +93,24 @@
             'font-weight:700;box-shadow:-2px 2px 6px rgba(0,0,0,.2);',
             'transition:background .2s,transform .2s;user-select:none;',
         '}',
-        '#jd-ph-btn:hover {',
+        '#ph-btn:hover {',
             'background:' + CONFIG.colorHover + ';transform:scale(1.08);',
         '}',
-        '#jd-ph-btn .jd-ph-btn-icon {',
+        '#ph-btn .ph-btn-icon {',
             'font-size:13px;letter-spacing:1px;line-height:1;padding:0 2px;',
         '}',
-        '#jd-ph-btn .jd-ph-btn-tip {',
+        '#ph-btn .ph-btn-tip {',
             'position:absolute;right:' + (CONFIG.btnWidth + 6) + 'px;top:50%;transform:translateY(-50%);',
             'background:rgba(0,0,0,.75);color:#fff;font-size:12px;',
             'padding:4px 10px;border-radius:4px;white-space:nowrap;',
             'opacity:0;pointer-events:none;transition:opacity .2s;',
         '}',
-        '#jd-ph-btn:hover .jd-ph-btn-tip {',
+        '#ph-btn:hover .ph-btn-tip {',
             'opacity:1;',
         '}',
 
         // ---- 面板 ----
-        '#jd-ph-panel {',
+        '#ph-panel {',
             'position:fixed;top:0;right:-' + CONFIG.panelWidth + 'px;',
             'width:' + CONFIG.panelWidth + 'px;height:100%;',
             'background:#fff;z-index:999999;',
@@ -100,184 +119,184 @@
             'display:flex;flex-direction:column;',
             'font-family:"Microsoft YaHei","PingFang SC",sans-serif;',
         '}',
-        '#jd-ph-panel.open { right:0; }',
+        '#ph-panel.open { right:0; }',
 
         // ---- 面板头部 ----
-        '#jd-ph-header {',
+        '#ph-header {',
             'display:flex;align-items:center;justify-content:space-between;',
             'padding:12px 16px;border-bottom:1px solid #eee;flex-shrink:0;',
         '}',
-        '#jd-ph-header .jd-ph-header-left {',
+        '#ph-header .ph-header-left {',
             'display:flex;align-items:center;gap:8px;',
         '}',
-        '#jd-ph-header h3 {',
+        '#ph-header h3 {',
             'margin:0;font-size:15px;color:#333;font-weight:600;',
         '}',
-        '#jd-ph-header .jd-ph-header-actions {',
+        '#ph-header .ph-header-actions {',
             'display:flex;align-items:center;gap:6px;',
         '}',
-        '#jd-ph-header .jd-ph-icon-btn {',
+        '#ph-header .ph-icon-btn {',
             'width:30px;height:30px;border-radius:50%;border:none;',
             'background:#f5f5f5;cursor:pointer;display:flex;',
             'align-items:center;justify-content:center;',
             'font-size:14px;color:#999;transition:all .2s;line-height:1;',
         '}',
-        '#jd-ph-header .jd-ph-icon-btn:hover {',
+        '#ph-header .ph-icon-btn:hover {',
             'background:' + CONFIG.color + ';color:#fff;',
         '}',
 
         // ---- 面板内容 ----
-        '#jd-ph-body {',
+        '#ph-body {',
             'flex:1;overflow:auto;padding:0;',
             'display:flex;flex-direction:column;align-items:center;justify-content:center;',
         '}',
-        '#jd-ph-body .jd-ph-body-inner {',
+        '#ph-body .ph-body-inner {',
             'width:100%;padding:16px;box-sizing:border-box;',
         '}',
-        '#jd-ph-chart-box {',
+        '#ph-chart-box {',
             'width:100%;height:380px;',
         '}',
 
         // ---- 加载状态 ----
-        '.jd-ph-spinner {',
+        '.ph-spinner {',
             'width:36px;height:36px;border:3px solid #eee;',
             'border-top-color:' + CONFIG.color + ';border-radius:50%;',
-            'animation:jd-ph-spin .8s linear infinite;',
+            'animation:ph-spin .8s linear infinite;',
         '}',
-        '@keyframes jd-ph-spin { to { transform:rotate(360deg); } }',
-        '.jd-ph-loading-text {',
+        '@keyframes ph-spin { to { transform:rotate(360deg); } }',
+        '.ph-loading-text {',
             'margin-top:12px;color:#999;font-size:13px;',
         '}',
 
         // ---- 错误状态 ----
-        '.jd-ph-error {',
+        '.ph-error {',
             'text-align:center;color:#999;padding:30px 20px;',
         '}',
-        '.jd-ph-error .jd-ph-error-icon {',
+        '.ph-error .ph-error-icon {',
             'font-size:40px;margin-bottom:8px;color:#ddd;',
         '}',
-        '.jd-ph-error p { margin:0 0 6px;font-size:13px; }',
-        '.jd-ph-error .jd-ph-error-detail { font-size:12px;color:#bbb; }',
-        '.jd-ph-error .jd-ph-btn {',
+        '.ph-error p { margin:0 0 6px;font-size:13px; }',
+        '.ph-error .ph-error-detail { font-size:12px;color:#bbb; }',
+        '.ph-error .ph-btn {',
             'margin-top:12px;padding:6px 20px;border:1px solid ' + CONFIG.color + ';',
             'background:#fff;color:' + CONFIG.color + ';border-radius:4px;',
             'cursor:pointer;font-size:13px;display:inline-block;',
         '}',
-        '.jd-ph-error .jd-ph-btn:hover { background:#fef0ef; }',
+        '.ph-error .ph-btn:hover { background:#fef0ef; }',
 
         // ---- 价格信息 ----
-        '.jd-ph-price-info {',
+        '.ph-price-info {',
             'display:flex;justify-content:space-around;padding:10px 0 14px;',
             'font-size:12px;color:#666;border-bottom:1px solid #f0f0f0;margin-bottom:10px;',
         '}',
-        '.jd-ph-price-info .jd-ph-price-item { text-align:center; }',
-        '.jd-ph-price-info .jd-ph-price-label { color:#999;margin-bottom:2px; }',
-        '.jd-ph-price-info .jd-ph-price-value { color:#333;font-weight:600;font-size:14px; }',
-        '.jd-ph-price-info .jd-ph-price-value.high { color:#E4393C; }',
-        '.jd-ph-price-info .jd-ph-price-value.low { color:#28a745; }',
+        '.ph-price-info .ph-price-item { text-align:center; }',
+        '.ph-price-info .ph-price-label { color:#999;margin-bottom:2px; }',
+        '.ph-price-info .ph-price-value { color:#333;font-weight:600;font-size:14px; }',
+        '.ph-price-info .ph-price-value.high { color:#E4393C; }',
+        '.ph-price-info .ph-price-value.low { color:#28a745; }',
 
         // ---- 底部链接 ----
-        '#jd-ph-footer {',
+        '#ph-footer {',
             'padding:10px 16px;border-top:1px solid #eee;text-align:center;flex-shrink:0;',
         '}',
-        '#jd-ph-footer a {',
+        '#ph-footer a {',
             'color:' + CONFIG.color + ';font-size:12px;text-decoration:none;',
         '}',
-        '#jd-ph-footer a:hover { text-decoration:underline; }',
+        '#ph-footer a:hover { text-decoration:underline; }',
 
         // ---- 设置弹窗 ----
-        '#jd-ph-settings {',
+        '#ph-settings {',
             'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);',
             'width:440px;max-width:90vw;background:#fff;border-radius:10px;',
             'z-index:1000000;box-shadow:0 8px 40px rgba(0,0,0,.25);',
             'padding:24px;font-family:"Microsoft YaHei","PingFang SC",sans-serif;',
             'display:none;',
         '}',
-        '#jd-ph-settings.open { display:block; }',
-        '#jd-ph-settings-header {',
+        '#ph-settings.open { display:block; }',
+        '#ph-settings-header {',
             'display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;',
         '}',
-        '#jd-ph-settings-header h2 { margin:0;font-size:17px;color:#333; }',
-        '#jd-ph-settings-close {',
+        '#ph-settings-header h2 { margin:0;font-size:17px;color:#333; }',
+        '#ph-settings-close {',
             'width:30px;height:30px;border-radius:50%;border:none;',
             'background:#f5f5f5;cursor:pointer;display:flex;',
             'align-items:center;justify-content:center;',
             'font-size:16px;color:#999;transition:all .2s;line-height:1;flex-shrink:0;',
         '}',
-        '#jd-ph-settings-close:hover {',
+        '#ph-settings-close:hover {',
             'background:' + CONFIG.color + ';color:#fff;',
         '}',
-        '#jd-ph-settings .jd-ph-settings-desc {',
+        '#ph-settings .ph-settings-desc {',
             'font-size:12px;color:#999;line-height:1.7;margin:0 0 14px;',
         '}',
-        '#jd-ph-settings .jd-ph-settings-desc code {',
+        '#ph-settings .ph-settings-desc code {',
             'background:#f5f5f5;padding:1px 5px;border-radius:3px;font-size:11px;',
         '}',
-        '#jd-ph-settings textarea {',
+        '#ph-settings textarea {',
             'width:100%;height:100px;border:1px solid #ddd;border-radius:6px;',
             'padding:10px;font-size:12px;font-family:monospace;resize:vertical;',
             'box-sizing:border-box;outline:none;transition:border-color .2s;',
         '}',
-        '#jd-ph-settings textarea:focus { border-color:' + CONFIG.color + ';}',
-        '#jd-ph-settings .jd-ph-settings-actions {',
+        '#ph-settings textarea:focus { border-color:' + CONFIG.color + ';}',
+        '#ph-settings .ph-settings-actions {',
             'display:flex;gap:8px;margin-top:12px;',
         '}',
-        '#jd-ph-settings .jd-ph-btn-primary {',
+        '#ph-settings .ph-btn-primary {',
             'padding:7px 20px;background:' + CONFIG.color + ';color:#fff;',
             'border:none;border-radius:5px;cursor:pointer;font-size:13px;flex:1;',
         '}',
-        '#jd-ph-settings .jd-ph-btn-primary:hover { background:' + CONFIG.colorHover + ';}',
-        '#jd-ph-settings .jd-ph-btn-secondary {',
+        '#ph-settings .ph-btn-primary:hover { background:' + CONFIG.colorHover + ';}',
+        '#ph-settings .ph-btn-secondary {',
             'padding:7px 20px;background:#f5f5f5;color:#666;',
             'border:none;border-radius:5px;cursor:pointer;font-size:13px;',
         '}',
-        '#jd-ph-settings .jd-ph-btn-secondary:hover { background:#e8e8e8; }',
-        '#jd-ph-settings .jd-ph-btn-danger {',
+        '#ph-settings .ph-btn-secondary:hover { background:#e8e8e8; }',
+        '#ph-settings .ph-btn-danger {',
             'padding:7px 20px;background:#fff;color:#E4393C;',
             'border:1px solid #E4393C;border-radius:5px;cursor:pointer;font-size:13px;',
         '}',
-        '#jd-ph-settings .jd-ph-btn-danger:hover { background:#fef0ef; }',
-        '#jd-ph-settings .jd-ph-settings-status {',
+        '#ph-settings .ph-btn-danger:hover { background:#fef0ef; }',
+        '#ph-settings .ph-settings-status {',
             'margin-top:10px;padding:8px 12px;border-radius:5px;font-size:12px;display:none;',
         '}',
-        '#jd-ph-settings .jd-ph-settings-status.success {',
+        '#ph-settings .ph-settings-status.success {',
             'display:block;background:#e8f8e6;color:#28a745;',
         '}',
-        '#jd-ph-settings .jd-ph-settings-status.error {',
+        '#ph-settings .ph-settings-status.error {',
             'display:block;background:#fef0ef;color:#E4393C;',
         '}',
-        '#jd-ph-settings .jd-ph-settings-status.loading {',
+        '#ph-settings .ph-settings-status.loading {',
             'display:block;background:#f0f7ff;color:#1890ff;',
         '}',
 
         // ---- 开关组件 ----
-        '.jd-ph-switch {',
+        '.ph-switch {',
             'position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;',
         '}',
-        '.jd-ph-switch input { opacity:0;width:0;height:0; }',
-        '.jd-ph-switch .jd-ph-slider {',
+        '.ph-switch input { opacity:0;width:0;height:0; }',
+        '.ph-switch .ph-slider {',
             'position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;',
             'background:#ccc;border-radius:24px;transition:.3s;',
         '}',
-        '.jd-ph-switch .jd-ph-slider:before {',
+        '.ph-switch .ph-slider:before {',
             'position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;',
             'background:#fff;border-radius:50%;transition:.3s;',
         '}',
-        '.jd-ph-switch input:checked + .jd-ph-slider { background:' + CONFIG.color + '; }',
-        '.jd-ph-switch input:checked + .jd-ph-slider:before { transform:translateX(20px); }',
-        '.jd-ph-settings-section { margin-bottom:16px; }',
-        '.jd-ph-settings-section-title {',
+        '.ph-switch input:checked + .ph-slider { background:' + CONFIG.color + '; }',
+        '.ph-switch input:checked + .ph-slider:before { transform:translateX(20px); }',
+        '.ph-settings-section { margin-bottom:16px; }',
+        '.ph-settings-section-title {',
             'font-size:13px;font-weight:600;color:#333;margin:0 0 8px;',
         '}',
-        '.jd-ph-settings-row {',
+        '.ph-settings-row {',
             'display:flex;align-items:center;justify-content:space-between;',
             'padding:8px 0;border-bottom:1px solid #f5f5f5;',
         '}',
-        '.jd-ph-settings-row:last-child { border-bottom:none; }',
-        '.jd-ph-settings-row label { font-size:13px;color:#333;cursor:pointer; }',
+        '.ph-settings-row:last-child { border-bottom:none; }',
+        '.ph-settings-row label { font-size:13px;color:#333;cursor:pointer; }',
 
         // ---- 动态隐藏 JD 电梯 ----
-        '#jd-ph-elevator-style { display:none; }',
+        '#ph-elevator-style { display:none; }',
 
     ].join('\n');
 
@@ -532,77 +551,81 @@
         btn.style.display = GM_getValue(BTN_HIDDEN_KEY, false) ? 'none' : '';
     }
 
-    function applyJdElevator() {
-        var hidden = GM_getValue(JD_ELEVATOR_HIDDEN_KEY, false);
+    function applyPlatformElevator() {
+        var hidden = GM_getValue(ELEVATOR_HIDDEN_KEY, false);
         if (!elevatorStyle) {
             elevatorStyle = document.createElement('style');
-            elevatorStyle.id = 'jd-ph-elevator-style';
+            elevatorStyle.id = 'ph-elevator-style';
             document.head.appendChild(elevatorStyle);
         }
-        elevatorStyle.textContent = hidden ? '#elevator_from_common_component{display:none!important}' : '';
+        if (hidden && currentPlatform && currentPlatform.elevatorSelector) {
+            elevatorStyle.textContent = currentPlatform.elevatorSelector + '{display:none!important}';
+        } else {
+            elevatorStyle.textContent = '';
+        }
     }
 
     function showSettings() {
         if (!settingsEl) {
-            settingsEl = el('div', { id: 'jd-ph-settings' }, [
-                el('div', { id: 'jd-ph-settings-header' }, [
+            settingsEl = el('div', { id: 'ph-settings' }, [
+                el('div', { id: 'ph-settings-header' }, [
                     el('h2', null, ['设置']),
-                    el('button', { id: 'jd-ph-settings-close', className: 'jd-ph-icon-btn', title: '关闭' }, ['\u00d7']),
+                    el('button', { id: 'ph-settings-close', className: 'ph-icon-btn', title: '关闭' }, ['\u00d7']),
                 ]),
-                el('div', { className: 'jd-ph-settings-section' }, [
-                    el('div', { className: 'jd-ph-settings-section-title' }, ['开关']),
-                    el('div', { className: 'jd-ph-settings-row' }, [
-                        el('label', { htmlFor: 'jd-ph-toggle-btn' }, ['隐藏脚本浮动按钮']),
-                        el('label', { className: 'jd-ph-switch' }, [
-                            el('input', { type: 'checkbox', id: 'jd-ph-toggle-btn' }),
-                            el('span', { className: 'jd-ph-slider' }),
+                el('div', { className: 'ph-settings-section' }, [
+                    el('div', { className: 'ph-settings-section-title' }, ['开关']),
+                    el('div', { className: 'ph-settings-row' }, [
+                        el('label', { htmlFor: 'ph-toggle-btn' }, ['隐藏脚本浮动按钮']),
+                        el('label', { className: 'ph-switch' }, [
+                            el('input', { type: 'checkbox', id: 'ph-toggle-btn' }),
+                            el('span', { className: 'ph-slider' }),
                         ]),
                     ]),
-                    el('div', { className: 'jd-ph-settings-row' }, [
-                        el('label', { htmlFor: 'jd-ph-toggle-elevator' }, ['隐藏京东楼层导航']),
-                        el('label', { className: 'jd-ph-switch' }, [
-                            el('input', { type: 'checkbox', id: 'jd-ph-toggle-elevator' }),
-                            el('span', { className: 'jd-ph-slider' }),
+                    el('div', { className: 'ph-settings-row' }, [
+                        el('label', { htmlFor: 'ph-toggle-elevator' }, ['隐藏京东楼层导航']),
+                        el('label', { className: 'ph-switch' }, [
+                            el('input', { type: 'checkbox', id: 'ph-toggle-elevator' }),
+                            el('span', { className: 'ph-slider' }),
                         ]),
                     ]),
                 ]),
                 el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }),
-                el('div', { className: 'jd-ph-settings-section' }, [
-                    el('div', { className: 'jd-ph-settings-section-title' }, ['Cookie']),
-                    el('p', { className: 'jd-ph-settings-desc' }, [
+                el('div', { className: 'ph-settings-section' }, [
+                    el('div', { className: 'ph-settings-section-title' }, ['Cookie']),
+                    el('p', { className: 'ph-settings-desc' }, [
                         '获取方式：打开 ',
                         el('code', null, ['https://tool.manmanbuy.com']),
                         '，F12 \u2192 Console，执行 ',
                         el('code', null, ["copy(document.cookie)"]),
                         ' 粘贴到下方。',
                     ]),
-                    el('textarea', { id: 'jd-ph-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
-                    el('div', { className: 'jd-ph-settings-actions' }, [
-                        el('button', { className: 'jd-ph-btn-primary', id: 'jd-ph-save-cookie' }, ['保存']),
-                        el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-clear-cookie' }, ['清除']),
+                    el('textarea', { id: 'ph-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
+                    el('div', { className: 'ph-settings-actions' }, [
+                        el('button', { className: 'ph-btn-primary', id: 'ph-save-cookie' }, ['保存']),
+                        el('button', { className: 'ph-btn-secondary', id: 'ph-clear-cookie' }, ['清除']),
                     ]),
                 ]),
-                el('div', { className: 'jd-ph-settings-status', id: 'jd-ph-settings-status' }),
+                el('div', { className: 'ph-settings-status', id: 'ph-settings-status' }),
                 el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }),
-                el('div', { className: 'jd-ph-settings-actions' }, [
-                    el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-update-secret', style: 'flex:1' }, ['更新密钥']),
+                el('div', { className: 'ph-settings-actions' }, [
+                    el('button', { className: 'ph-btn-secondary', id: 'ph-update-secret', style: 'flex:1' }, ['更新密钥']),
                 ]),
-                el('div', { id: 'jd-ph-secret-info', style: 'font-size:11px;color:#aaa;text-align:center;margin-top:10px;line-height:1.6' }),
+                el('div', { id: 'ph-secret-info', style: 'font-size:11px;color:#aaa;text-align:center;margin-top:10px;line-height:1.6' }),
             ]);
             document.body.appendChild(settingsEl);
 
-            settingsEl.querySelector('#jd-ph-toggle-btn').addEventListener('change', function () {
+            settingsEl.querySelector('#ph-toggle-btn').addEventListener('change', function () {
                 GM_setValue(BTN_HIDDEN_KEY, this.checked);
                 applyBtnVisibility();
             });
 
-            settingsEl.querySelector('#jd-ph-toggle-elevator').addEventListener('change', function () {
-                GM_setValue(JD_ELEVATOR_HIDDEN_KEY, this.checked);
-                applyJdElevator();
+            settingsEl.querySelector('#ph-toggle-elevator').addEventListener('change', function () {
+                GM_setValue(ELEVATOR_HIDDEN_KEY, this.checked);
+                applyPlatformElevator();
             });
 
-            settingsEl.querySelector('#jd-ph-save-cookie').addEventListener('click', function () {
-                var val = settingsEl.querySelector('#jd-ph-cookie-input').value.trim();
+            settingsEl.querySelector('#ph-save-cookie').addEventListener('click', function () {
+                var val = settingsEl.querySelector('#ph-cookie-input').value.trim();
                 if (!val) {
                     showSettingsStatus('error', '请输入 Cookie');
                     return;
@@ -612,15 +635,15 @@
                 setTimeout(function () { hideSettings(); }, 1200);
             });
 
-            settingsEl.querySelector('#jd-ph-clear-cookie').addEventListener('click', function () {
+            settingsEl.querySelector('#ph-clear-cookie').addEventListener('click', function () {
                 clearCookie();
-                settingsEl.querySelector('#jd-ph-cookie-input').value = '';
+                settingsEl.querySelector('#ph-cookie-input').value = '';
                 showSettingsStatus('success', 'Cookie 已清除');
             });
 
-            settingsEl.querySelector('#jd-ph-settings-close').addEventListener('click', hideSettings);
+            settingsEl.querySelector('#ph-settings-close').addEventListener('click', hideSettings);
 
-            settingsEl.querySelector('#jd-ph-update-secret').addEventListener('click', function () {
+            settingsEl.querySelector('#ph-update-secret').addEventListener('click', function () {
                 var btn = this;
                 btn.textContent = '更新中...';
                 btn.disabled = true;
@@ -641,7 +664,7 @@
             var secret = getSecret();
             var time = GM_getValue(MMB_SECRET_TIME_KEY, 0);
             var timeStr = time ? dateFormat(new Date(time), 'yyyy-MM-dd HH:mm') : '未知';
-            var infoEl = settingsEl.querySelector('#jd-ph-secret-info');
+            var infoEl = settingsEl.querySelector('#ph-secret-info');
             if (infoEl) infoEl.innerHTML = '密钥: ' + secret.substring(0, 16) + '...<br>更新: ' + timeStr;
         }
 
@@ -649,10 +672,10 @@
 
         var existing = getCookie();
         if (existing) {
-            settingsEl.querySelector('#jd-ph-cookie-input').value = existing;
+            settingsEl.querySelector('#ph-cookie-input').value = existing;
         }
-        settingsEl.querySelector('#jd-ph-toggle-btn').checked = GM_getValue(BTN_HIDDEN_KEY, false);
-        settingsEl.querySelector('#jd-ph-toggle-elevator').checked = GM_getValue(JD_ELEVATOR_HIDDEN_KEY, false);
+        settingsEl.querySelector('#ph-toggle-btn').checked = GM_getValue(BTN_HIDDEN_KEY, false);
+        settingsEl.querySelector('#ph-toggle-elevator').checked = GM_getValue(ELEVATOR_HIDDEN_KEY, false);
 
         settingsEl.classList.add('open');
         if (overlay) overlay.classList.add('active');
@@ -664,8 +687,8 @@
     }
 
     function showSettingsStatus(type, msg) {
-        var status = settingsEl.querySelector('#jd-ph-settings-status');
-        status.className = 'jd-ph-settings-status ' + type;
+        var status = settingsEl.querySelector('#ph-settings-status');
+        status.className = 'ph-settings-status ' + type;
         status.textContent = msg;
     }
 
@@ -676,46 +699,46 @@
     var isOpen = false;
     var fetched = false;
     var isLoading = false;
-    var cleanUrl = getCleanJdUrl();
+    var cleanUrl = getCleanUrl();
     var currentData = null;  // 缓存的图表数据
 
     /* ============================================================
      *  UI 构建
      * ============================================================ */
     function buildUI() {
-        overlay = el('div', { id: 'jd-ph-overlay' });
+        overlay = el('div', { id: 'ph-overlay' });
 
-        var iconSpan = el('span', { className: 'jd-ph-btn-icon' }, ['历史价格']);
-        var tipSpan = el('span', { className: 'jd-ph-btn-tip' }, ['查看历史价格']);
-        btn = el('div', { id: 'jd-ph-btn' }, [iconSpan, tipSpan]);
+        var iconSpan = el('span', { className: 'ph-btn-icon' }, ['历史价格']);
+        var tipSpan = el('span', { className: 'ph-btn-tip' }, ['查看历史价格']);
+        btn = el('div', { id: 'ph-btn' }, [iconSpan, tipSpan]);
 
-        var closeBtn = el('button', { className: 'jd-ph-icon-btn', title: '关闭' }, ['\u00d7']);
-        var settingsBtn = el('button', { className: 'jd-ph-icon-btn', title: '设置' }, ['\u2699']);
-        var header = el('div', { id: 'jd-ph-header' }, [
-            el('div', { className: 'jd-ph-header-left' }, [
+        var closeBtn = el('button', { className: 'ph-icon-btn', title: '关闭' }, ['\u00d7']);
+        var settingsBtn = el('button', { className: 'ph-icon-btn', title: '设置' }, ['\u2699']);
+        var header = el('div', { id: 'ph-header' }, [
+            el('div', { className: 'ph-header-left' }, [
                 el('h3', null, ['历史价格走势']),
             ]),
-            el('div', { className: 'jd-ph-header-actions' }, [
+            el('div', { className: 'ph-header-actions' }, [
                 settingsBtn,
                 closeBtn,
             ]),
         ]);
 
-        bodyEl = el('div', { id: 'jd-ph-body' });
+        bodyEl = el('div', { id: 'ph-body' });
 
-        var footer = el('div', { id: 'jd-ph-footer' }, [
+        var footer = el('div', { id: 'ph-footer' }, [
             el('a', { href: 'https://tool.manmanbuy.com/', target: '_blank', rel: 'noopener' }, [
                 '数据来源：慢慢买 \u2197'
             ]),
         ]);
 
-        panel = el('div', { id: 'jd-ph-panel' }, [header, bodyEl, footer]);
+        panel = el('div', { id: 'ph-panel' }, [header, bodyEl, footer]);
         document.body.appendChild(overlay);
         document.body.appendChild(panel);
         document.body.appendChild(btn);
 
         applyBtnVisibility();
-        applyJdElevator();
+        applyPlatformElevator();
 
         btn.addEventListener('click', togglePanel);
         overlay.addEventListener('click', closePanel);
@@ -759,8 +782,8 @@
         bodyEl.innerHTML = '';
         bodyEl.style.display = 'flex';
         bodyEl.appendChild(el('div', { style: 'text-align:center;' }, [
-            el('div', { className: 'jd-ph-spinner' }),
-            el('p', { className: 'jd-ph-loading-text' }, ['正在查询历史价格...']),
+            el('div', { className: 'ph-spinner' }),
+            el('p', { className: 'ph-loading-text' }, ['正在查询历史价格...']),
         ]));
     }
 
@@ -778,15 +801,15 @@
 
         // 价格摘要
         var prices = data.map(function(d) { return d[1]; });
-        var infoHtml = '<div class="jd-ph-price-info">';
-        infoHtml += '<div class="jd-ph-price-item"><div class="jd-ph-price-label">当前价</div><div class="jd-ph-price-value">¥' + meta.current + '</div></div>';
-        infoHtml += '<div class="jd-ph-price-item"><div class="jd-ph-price-label">历史最低</div><div class="jd-ph-price-value low">¥' + meta.lowest + '</div></div>';
-        infoHtml += '<div class="jd-ph-price-item"><div class="jd-ph-price-label">最高</div><div class="jd-ph-price-value high">¥' + meta.highest + '</div></div>';
+        var infoHtml = '<div class="ph-price-info">';
+        infoHtml += '<div class="ph-price-item"><div class="ph-price-label">当前价</div><div class="ph-price-value">¥' + meta.current + '</div></div>';
+        infoHtml += '<div class="ph-price-item"><div class="ph-price-label">历史最低</div><div class="ph-price-value low">¥' + meta.lowest + '</div></div>';
+        infoHtml += '<div class="ph-price-item"><div class="ph-price-label">最高</div><div class="ph-price-value high">¥' + meta.highest + '</div></div>';
         infoHtml += '</div>';
 
-        bodyEl.innerHTML = '<div class="jd-ph-body-inner">' + infoHtml + '<div id="jd-ph-chart-box"></div></div>';
+        bodyEl.innerHTML = '<div class="ph-body-inner">' + infoHtml + '<div id="ph-chart-box"></div></div>';
 
-        var chartDom = document.getElementById('jd-ph-chart-box');
+        var chartDom = document.getElementById('ph-chart-box');
         var myChart = echarts.init(chartDom);
 
         var maxPrice = Math.max.apply(null, prices);
@@ -855,9 +878,9 @@
         bodyEl.innerHTML = '';
         bodyEl.style.display = 'flex';
         var children = [
-            el('div', { className: 'jd-ph-error-icon' }, ['!']),
+            el('div', { className: 'ph-error-icon' }, ['!']),
             el('p', null, ['获取历史价格失败']),
-            el('p', { className: 'jd-ph-error-detail' }, [msg || '请稍后重试']),
+            el('p', { className: 'ph-error-detail' }, [msg || '请稍后重试']),
         ];
         if (canRetry) {
             var retryBtn = el('button', {
@@ -869,7 +892,7 @@
             }, ['重试']);
             children.push(retryBtn);
         }
-        var errorEl = el('div', { className: 'jd-ph-error' }, children);
+        var errorEl = el('div', { className: 'ph-error' }, children);
         bodyEl.appendChild(errorEl);
 
         if (canRetry) {
@@ -885,7 +908,7 @@
         bodyEl.innerHTML = '';
         bodyEl.style.display = 'block';
         var iframe = el('iframe', {
-            src: MMB_URL + encodeURIComponent(getCleanJdUrl()),
+            src: MMB_URL + encodeURIComponent(getCleanUrl()),
             style: 'width:100%;flex:1;border:none;border-radius:6px;min-height:500px;',
             sandbox: 'allow-scripts allow-same-origin',
         });
@@ -897,7 +920,7 @@
      * ============================================================ */
     function fetchChart() {
         showLoading();
-        var jdUrl = getCleanJdUrl();
+        var jdUrl = getCleanUrl();
         var cookie = getCookie();
 
         GM_xmlhttpRequest({
@@ -914,7 +937,7 @@
                         var extraCookies = setCookieMatch[1].split(';')[0];
                         if (cookie.indexOf(extraCookies.split('=')[0]) === -1) {
                             cookie = (cookie ? cookie + '; ' : '') + extraCookies;
-                            console.log('[jd-ph] 合并了新Cookie:', extraCookies.split('=')[0]);
+                            console.log('[ph] 合并了新Cookie:', extraCookies.split('=')[0]);
                         }
                     }
                 }
@@ -922,14 +945,14 @@
                 var m = html.match(/id="ticket" value="([^"]+)"/);
                 if (!m) { showError('无法获取票据，请确认Cookie是否有效', true); return; }
                 var ticket = m[1];
-                console.log('[jd-ph] 原始ticket:', ticket);
+                console.log('[ph] 原始ticket:', ticket);
                 if (ticket.length > 4) ticket = ticket.substr(ticket.length - 4, 4) + ticket.substr(0, ticket.length - 4);
-                console.log('[jd-ph] 转换后ticket:', ticket);
+                console.log('[ph] 转换后ticket:', ticket);
 
                 // 调 API
                 var apiParams = generateToken({ method: 'getHistoryTrend', key: jdUrl });
                 var postData = 'method=' + encodeURIComponent(apiParams.method) + '&key=' + encodeURIComponent(apiParams.key) + '&t=' + apiParams.t + '&token=' + apiParams.token;
-                console.log('[jd-ph] POST数据: t=' + apiParams.t + ' token=' + apiParams.token);
+                console.log('[ph] POST数据: t=' + apiParams.t + ' token=' + apiParams.token);
                 GM_xmlhttpRequest({
                     method: 'POST',
                     url: 'https://tool.manmanbuy.com/api.ashx',
@@ -946,16 +969,16 @@
                         try {
                             var ret = JSON.parse(apiRes.responseText);
                             if (ret.code !== 0 || !ret.data || !ret.data.datePrice) {
-                                console.log('[jd-ph] API 响应:', apiRes.responseText);
-                                console.log('[jd-ph] ticket:', ticket);
+                                console.log('[ph] API 响应:', apiRes.responseText);
+                                console.log('[ph] ticket:', ticket);
                                 showError((ret.msg || '暂无价格数据') + ' (code=' + ret.code + ')', true);
                                 return;
                             }
-                            console.log('[jd-ph] 价格数据获取成功!');
-                            console.log('[jd-ph] 商品:', ret.data.spName);
-                            console.log('[jd-ph] 当前价:', ret.data.currentPrice);
-                            console.log('[jd-ph] 历史最低:', ret.data.lowerPrice, ret.data.lowerDate);
-                            console.log('[jd-ph] 价格点数:', ret.data.datePrice.split('],[').length);
+                            console.log('[ph] 价格数据获取成功!');
+                            console.log('[ph] 商品:', ret.data.spName);
+                            console.log('[ph] 当前价:', ret.data.currentPrice);
+                            console.log('[ph] 历史最低:', ret.data.lowerPrice, ret.data.lowerDate);
+                            console.log('[ph] 价格点数:', ret.data.datePrice.split('],[').length);
                             // 解析 datePrice: "[ts1,p1,''],[ts2,p2,'']"
                             var rawData = eval('([' + ret.data.datePrice + '])');
                             var prices = rawData.map(function(d) { return d[1]; });
@@ -987,7 +1010,13 @@
         GM_registerMenuCommand('⚙ 设置', function() {
             showSettings();
         });
-        if (!/item\.jd\.com\/\d+\.html/i.test(location.href)) return;
+        for (var i = 0; i < PLATFORMS.length; i++) {
+            if (PLATFORMS[i].match.test(location.href)) {
+                currentPlatform = PLATFORMS[i];
+                break;
+            }
+        }
+        if (!currentPlatform) return;
         buildUI();
     }
 
