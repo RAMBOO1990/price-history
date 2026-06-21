@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         京东历史价格 - 慢慢买查价
-// @namespace    https://github.com/ramboo/jd-price-history
-// @version      2.0
+// @namespace    https://github.com/ramboo1990/jd-price-history
+// @version      1.0
 // @description  京东商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
-// @author       ramboo
+// @author       R9
 // @match        https://item.jd.com/*
 // @icon         https://www.jd.com/favicon.ico
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,6 @@
 // @grant        GM_openInTab
 // @require      https://cdn.jsdelivr.net/npm/echarts@5.3.0/dist/echarts.min.js
 // @connect      manmanbuy.com
-// @license      MIT
 // ==/UserScript==
 
 (function () {
@@ -668,13 +667,20 @@
         ]));
     }
 
-    function showChart(categories, prices, meta) {
+    function showChart(rawData, meta) {
         fetched = true;
         isLoading = false;
         bodyEl.innerHTML = '';
         bodyEl.style.display = 'block';
 
+        // 过滤无效数据
+        var data = [];
+        for (var i = 0; i < rawData.length; i++) {
+            if (rawData[i][1] > 0) data.push([rawData[i][0], rawData[i][1], rawData[i][2] || '']);
+        }
+
         // 价格摘要
+        var prices = data.map(function(d) { return d[1]; });
         var infoHtml = '<div class="jd-ph-price-info">';
         infoHtml += '<div class="jd-ph-price-item"><div class="jd-ph-price-label">当前价</div><div class="jd-ph-price-value">¥' + meta.current + '</div></div>';
         infoHtml += '<div class="jd-ph-price-item"><div class="jd-ph-price-label">历史最低</div><div class="jd-ph-price-value low">¥' + meta.lowest + '</div></div>';
@@ -685,15 +691,64 @@
 
         var chartDom = document.getElementById('jd-ph-chart-box');
         var myChart = echarts.init(chartDom);
+
+        var maxPrice = Math.max.apply(null, prices);
+        var minPrice = Math.min.apply(null, prices);
+        var yMin = minPrice - ((minPrice + maxPrice) / 2 - minPrice);
+        yMin = yMin >= 0 ? yMin : 0;
+        var yMax = maxPrice + (maxPrice - minPrice) / 4;
+
         myChart.setOption({
-            tooltip: { trigger: 'axis' },
-            xAxis: { type: 'time', boundaryGap: false },
-            yAxis: { type: 'value', min: function(v) { return v.min - 50; } },
+            animation: false,
+            tooltip: {
+                trigger: 'axis',
+                formatter: function(obj) {
+                    if (!obj || !obj.length) return '';
+                    var d = obj[0].data;
+                    var date = new Date(d[0]);
+                    var time = (date.getMonth() + 1) + '-' + date.getDate();
+                    var html = '<div style="border-radius:10px;padding:0 10px;height:22px;line-height:22px;background:#5B5B69;color:#fff;font-size:11px;">' +
+                        time + ' &yen;' + d[1] + '</div>';
+                    if (d[2]) {
+                        html = '<div style="border-radius:10px;padding:0 10px;height:44px;line-height:22px;background:#5B5B69;color:#fff;font-size:11px;">' +
+                            time + ' &yen;' + d[1] + '<br/>' + d[2] + '</div>';
+                    }
+                    return html;
+                },
+                axisPointer: { type: 'line', lineStyle: { color: '#ec652e' } }
+            },
+            grid: { left: 50, right: 20, bottom: 30, top: 10 },
+            xAxis: {
+                type: 'time',
+                boundaryGap: false,
+                axisLine: { lineStyle: { color: '#F5F5F9' } },
+                axisLabel: { color: '#555', fontSize: 10 },
+                splitLine: { show: true, lineStyle: { color: '#F5F5F9' } },
+            },
+            yAxis: {
+                type: 'value', scale: true,
+                min: yMin, max: yMax,
+                axisLine: { lineStyle: { color: '#F5F5F9' } },
+                axisLabel: { color: '#555', fontSize: 10 },
+                splitLine: { show: true, lineStyle: { color: '#F5F5F9' } },
+            },
             series: [{
-                type: 'line', data: prices, smooth: true,
-                lineStyle: { color: '#E4393C', width: 2 },
-                areaStyle: { color: 'rgba(228,57,60,0.1)' },
+                type: 'line',
+                data: data,
+                smooth: true,
                 showSymbol: false,
+                lineStyle: { color: '#EE4D2D', width: 2 },
+                areaStyle: {
+                    color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [{ offset: 0, color: 'rgba(255,103,41,0.08)' }, { offset: 1, color: 'rgba(255,103,41,0)' }] }
+                },
+                markLine: {
+                    silent: true, symbol: 'none',
+                    data: [
+                        { type: 'max', label: { formatter: '{c}', color: '#999', fontSize: 10 } },
+                        { type: 'min', label: { formatter: '{c}', color: '#999', fontSize: 10 } },
+                    ]
+                }
             }]
         });
     }
@@ -806,11 +861,10 @@
                             console.log('[jd-ph] 价格点数:', ret.data.datePrice.split('],[').length);
                             // 解析 datePrice: "[ts1,p1,''],[ts2,p2,'']"
                             var rawData = eval('([' + ret.data.datePrice + '])');
-                            var categories = rawData.map(function(d) { return new Date(d[0]); });
                             var prices = rawData.map(function(d) { return d[1]; });
                             var highest = Math.max.apply(null, prices);
                             var lowest = Math.min.apply(null, prices);
-                            showChart(categories, prices, {
+                            showChart(rawData, {
                                 current: prices[prices.length - 1],
                                 highest: highest,
                                 lowest: lowest
