@@ -572,7 +572,9 @@
                     el('p', { className: 'jd-ph-settings-desc' }, [
                         '获取方式：打开 ',
                         el('code', null, ['https://tool.manmanbuy.com']),
-                        '，F12 \u2192 Application \u2192 Cookies，复制所有 Cookie 值。',
+                        '，F12 \u2192 Console，执行 ',
+                        el('code', null, ["copy(document.cookie)"]),
+                        ' 粘贴到下方。',
                     ]),
                     el('textarea', { id: 'jd-ph-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
                     el('div', { className: 'jd-ph-settings-actions' }, [
