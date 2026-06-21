@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         历史价格 - 慢慢买查价
 // @namespace    https://github.com/ramboo1990/price-history
-// @version      1.1
+// @version      1.2
 // @description  商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
 // @match        https://item.jd.com/*
+// @match        https://detail.tmall.com/item.htm*
 // @icon         https://www.jd.com/favicon.ico
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -49,6 +50,26 @@
             },
             elevatorSelector: '#elevator_from_common_component',
             icon: 'https://www.jd.com/favicon.ico',
+        },
+        {
+            name: '天猫',
+            match: /detail\.tmall\.com\/item/i,
+            getCleanUrl: function () {
+                var url = location.href;
+                var m = url.match(/^https?:\/\/detail\.tmall\.com\/item[^?#]*/i);
+                if (!m) return url.replace(/[?#].*$/, '');
+                var base = m[0];
+                var q = url.indexOf('?');
+                if (q === -1) return base;
+                var params = url.substring(q + 1).split('&');
+                var keep = [];
+                for (var i = 0; i < params.length; i++) {
+                    var kv = params[i].split('=');
+                    if (kv[0] === 'id' || kv[0] === 'skuId') keep.push(params[i]);
+                }
+                return keep.length ? base + '?' + keep.join('&') : base;
+            },
+            icon: 'https://www.tmall.com/favicon.ico',
         },
     ];
     var currentPlatform = null;
