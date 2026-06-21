@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         京东历史价格 - 慢慢买查价
 // @namespace    https://github.com/ramboo1990/price-history
-// @version      1.0
+// @version      1.1
 // @description  京东商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
 // @match        https://item.jd.com/*
@@ -25,6 +25,7 @@
      * ============================================================ */
     const CONFIG = {
         btnSize: 46,
+        btnWidth: 80,
         panelWidth: 520,
         color: '#E4393C',
         colorHover: '#C1272D',
@@ -35,6 +36,8 @@
     const MMB_SECRET_KEY = 'jd-ph.mmb.secret';
     const MMB_SECRET_TIME_KEY = 'jd-ph.mmb.secret_time';
     const MMB_SECRET_DEFAULT = 'c5c3f201a8e8fc634d37a766a0299218';
+    const BTN_HIDDEN_KEY = 'jd-ph.btn.hidden';
+    const JD_ELEVATOR_HIDDEN_KEY = 'jd-ph.elevator.hidden';
     const MMB_URL = 'https://tool.manmanbuy.com/HistoryLowest.aspx?url=';
 
     /* ============================================================
@@ -64,21 +67,21 @@
         // ---- 浮动按钮 ----
         '#jd-ph-btn {',
             'position:fixed;right:0;top:35%;z-index:999997;',
-            'width:' + CONFIG.btnSize + 'px;height:' + CONFIG.btnSize + 'px;',
+            'width:' + CONFIG.btnWidth + 'px;height:' + CONFIG.btnSize + 'px;',
             'background:' + CONFIG.color + ';color:#fff;',
             'border-radius:' + (CONFIG.btnSize / 2) + 'px 0 0 ' + (CONFIG.btnSize / 2) + 'px;',
             'cursor:pointer;display:flex;align-items:center;justify-content:center;',
-            'font-size:18px;font-weight:700;box-shadow:-2px 2px 6px rgba(0,0,0,.2);',
+            'font-weight:700;box-shadow:-2px 2px 6px rgba(0,0,0,.2);',
             'transition:background .2s,transform .2s;user-select:none;',
         '}',
         '#jd-ph-btn:hover {',
             'background:' + CONFIG.colorHover + ';transform:scale(1.08);',
         '}',
         '#jd-ph-btn .jd-ph-btn-icon {',
-            'writing-mode:vertical-lr;letter-spacing:2px;font-size:14px;line-height:1.3;',
+            'font-size:13px;letter-spacing:1px;line-height:1;padding:0 2px;',
         '}',
         '#jd-ph-btn .jd-ph-btn-tip {',
-            'position:absolute;right:52px;top:50%;transform:translateY(-50%);',
+            'position:absolute;right:' + (CONFIG.btnWidth + 6) + 'px;top:50%;transform:translateY(-50%);',
             'background:rgba(0,0,0,.75);color:#fff;font-size:12px;',
             'padding:4px 10px;border-radius:4px;white-space:nowrap;',
             'opacity:0;pointer-events:none;transition:opacity .2s;',
@@ -191,8 +194,18 @@
             'display:none;',
         '}',
         '#jd-ph-settings.open { display:block; }',
-        '#jd-ph-settings h2 {',
-            'margin:0 0 6px;font-size:17px;color:#333;',
+        '#jd-ph-settings-header {',
+            'display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;',
+        '}',
+        '#jd-ph-settings-header h2 { margin:0;font-size:17px;color:#333; }',
+        '#jd-ph-settings-close {',
+            'width:30px;height:30px;border-radius:50%;border:none;',
+            'background:#f5f5f5;cursor:pointer;display:flex;',
+            'align-items:center;justify-content:center;',
+            'font-size:16px;color:#999;transition:all .2s;line-height:1;flex-shrink:0;',
+        '}',
+        '#jd-ph-settings-close:hover {',
+            'background:' + CONFIG.color + ';color:#fff;',
         '}',
         '#jd-ph-settings .jd-ph-settings-desc {',
             'font-size:12px;color:#999;line-height:1.7;margin:0 0 14px;',
@@ -236,6 +249,35 @@
         '#jd-ph-settings .jd-ph-settings-status.loading {',
             'display:block;background:#f0f7ff;color:#1890ff;',
         '}',
+
+        // ---- 开关组件 ----
+        '.jd-ph-switch {',
+            'position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;',
+        '}',
+        '.jd-ph-switch input { opacity:0;width:0;height:0; }',
+        '.jd-ph-switch .jd-ph-slider {',
+            'position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;',
+            'background:#ccc;border-radius:24px;transition:.3s;',
+        '}',
+        '.jd-ph-switch .jd-ph-slider:before {',
+            'position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;',
+            'background:#fff;border-radius:50%;transition:.3s;',
+        '}',
+        '.jd-ph-switch input:checked + .jd-ph-slider { background:' + CONFIG.color + '; }',
+        '.jd-ph-switch input:checked + .jd-ph-slider:before { transform:translateX(20px); }',
+        '.jd-ph-settings-section { margin-bottom:16px; }',
+        '.jd-ph-settings-section-title {',
+            'font-size:13px;font-weight:600;color:#333;margin:0 0 8px;',
+        '}',
+        '.jd-ph-settings-row {',
+            'display:flex;align-items:center;justify-content:space-between;',
+            'padding:8px 0;border-bottom:1px solid #f5f5f5;',
+        '}',
+        '.jd-ph-settings-row:last-child { border-bottom:none; }',
+        '.jd-ph-settings-row label { font-size:13px;color:#333;cursor:pointer; }',
+
+        // ---- 动态隐藏 JD 电梯 ----
+        '#jd-ph-elevator-style { display:none; }',
 
     ].join('\n');
 
@@ -483,32 +525,79 @@
      *  设置弹窗
      * ============================================================ */
     var settingsEl = null;
+    var elevatorStyle = null;
+
+    function applyBtnVisibility() {
+        if (!btn) return;
+        btn.style.display = GM_getValue(BTN_HIDDEN_KEY, false) ? 'none' : '';
+    }
+
+    function applyJdElevator() {
+        var hidden = GM_getValue(JD_ELEVATOR_HIDDEN_KEY, false);
+        if (!elevatorStyle) {
+            elevatorStyle = document.createElement('style');
+            elevatorStyle.id = 'jd-ph-elevator-style';
+            document.head.appendChild(elevatorStyle);
+        }
+        elevatorStyle.textContent = hidden ? '#elevator_from_common_component{display:none!important}' : '';
+    }
 
     function showSettings() {
         if (!settingsEl) {
             settingsEl = el('div', { id: 'jd-ph-settings' }, [
-                el('h2', null, ['Cookie 设置']),
-                el('p', { className: 'jd-ph-settings-desc' }, [
-                    '请粘贴从慢慢买网站获取的 Cookie 字符串。',
-                    el('br'),
-                    '获取方式：在浏览器打开 ',
-                    el('code', null, ['https://tool.manmanbuy.com']),
-                    '，F12 \u2192 Application \u2192 Cookies，复制所有 Cookie 值。',
+                el('div', { id: 'jd-ph-settings-header' }, [
+                    el('h2', null, ['设置']),
+                    el('button', { id: 'jd-ph-settings-close', className: 'jd-ph-icon-btn', title: '关闭' }, ['\u00d7']),
                 ]),
-                el('textarea', { id: 'jd-ph-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
-                el('div', { className: 'jd-ph-settings-actions' }, [
-                    el('button', { className: 'jd-ph-btn-primary', id: 'jd-ph-save-cookie' }, ['保存']),
-                    el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-clear-cookie' }, ['清除']),
-                    el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-close-settings' }, ['取消']),
+                el('div', { className: 'jd-ph-settings-section' }, [
+                    el('div', { className: 'jd-ph-settings-section-title' }, ['开关']),
+                    el('div', { className: 'jd-ph-settings-row' }, [
+                        el('label', { htmlFor: 'jd-ph-toggle-btn' }, ['隐藏脚本浮动按钮']),
+                        el('label', { className: 'jd-ph-switch' }, [
+                            el('input', { type: 'checkbox', id: 'jd-ph-toggle-btn' }),
+                            el('span', { className: 'jd-ph-slider' }),
+                        ]),
+                    ]),
+                    el('div', { className: 'jd-ph-settings-row' }, [
+                        el('label', { htmlFor: 'jd-ph-toggle-elevator' }, ['隐藏京东楼层导航']),
+                        el('label', { className: 'jd-ph-switch' }, [
+                            el('input', { type: 'checkbox', id: 'jd-ph-toggle-elevator' }),
+                            el('span', { className: 'jd-ph-slider' }),
+                        ]),
+                    ]),
+                ]),
+                el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }),
+                el('div', { className: 'jd-ph-settings-section' }, [
+                    el('div', { className: 'jd-ph-settings-section-title' }, ['Cookie']),
+                    el('p', { className: 'jd-ph-settings-desc' }, [
+                        '获取方式：打开 ',
+                        el('code', null, ['https://tool.manmanbuy.com']),
+                        '，F12 \u2192 Application \u2192 Cookies，复制所有 Cookie 值。',
+                    ]),
+                    el('textarea', { id: 'jd-ph-cookie-input', placeholder: '粘贴 Cookie 字符串...' }),
+                    el('div', { className: 'jd-ph-settings-actions' }, [
+                        el('button', { className: 'jd-ph-btn-primary', id: 'jd-ph-save-cookie' }, ['保存']),
+                        el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-clear-cookie' }, ['清除']),
+                    ]),
                 ]),
                 el('div', { className: 'jd-ph-settings-status', id: 'jd-ph-settings-status' }),
-                el('hr', { style: 'border:none;border-top:1px solid #eee;margin:14px 0 10px' }),
-                el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
-                    el('div', { id: 'jd-ph-secret-info', style: 'font-size:11px;color:#aaa;line-height:1.6' }),
-                    el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-update-secret', style: 'font-size:11px;padding:4px 10px;flex-shrink:0' }, ['更新密钥']),
+                el('hr', { style: 'border:none;border-top:1px solid #eee;margin:12px 0' }),
+                el('div', { className: 'jd-ph-settings-actions' }, [
+                    el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-update-secret', style: 'flex:1' }, ['更新密钥']),
                 ]),
+                el('div', { id: 'jd-ph-secret-info', style: 'font-size:11px;color:#aaa;text-align:center;margin-top:10px;line-height:1.6' }),
             ]);
             document.body.appendChild(settingsEl);
+
+            settingsEl.querySelector('#jd-ph-toggle-btn').addEventListener('change', function () {
+                GM_setValue(BTN_HIDDEN_KEY, this.checked);
+                applyBtnVisibility();
+            });
+
+            settingsEl.querySelector('#jd-ph-toggle-elevator').addEventListener('change', function () {
+                GM_setValue(JD_ELEVATOR_HIDDEN_KEY, this.checked);
+                applyJdElevator();
+            });
 
             settingsEl.querySelector('#jd-ph-save-cookie').addEventListener('click', function () {
                 var val = settingsEl.querySelector('#jd-ph-cookie-input').value.trim();
@@ -527,7 +616,7 @@
                 showSettingsStatus('success', 'Cookie 已清除');
             });
 
-            settingsEl.querySelector('#jd-ph-close-settings').addEventListener('click', hideSettings);
+            settingsEl.querySelector('#jd-ph-settings-close').addEventListener('click', hideSettings);
 
             settingsEl.querySelector('#jd-ph-update-secret').addEventListener('click', function () {
                 var btn = this;
@@ -560,6 +649,9 @@
         if (existing) {
             settingsEl.querySelector('#jd-ph-cookie-input').value = existing;
         }
+        settingsEl.querySelector('#jd-ph-toggle-btn').checked = GM_getValue(BTN_HIDDEN_KEY, false);
+        settingsEl.querySelector('#jd-ph-toggle-elevator').checked = GM_getValue(JD_ELEVATOR_HIDDEN_KEY, false);
+
         settingsEl.classList.add('open');
         if (overlay) overlay.classList.add('active');
     }
@@ -591,12 +683,12 @@
     function buildUI() {
         overlay = el('div', { id: 'jd-ph-overlay' });
 
-        var iconSpan = el('span', { className: 'jd-ph-btn-icon' }, ['历\n史\n价\n格']);
+        var iconSpan = el('span', { className: 'jd-ph-btn-icon' }, ['历史价格']);
         var tipSpan = el('span', { className: 'jd-ph-btn-tip' }, ['查看历史价格']);
         btn = el('div', { id: 'jd-ph-btn' }, [iconSpan, tipSpan]);
 
         var closeBtn = el('button', { className: 'jd-ph-icon-btn', title: '关闭' }, ['\u00d7']);
-        var settingsBtn = el('button', { className: 'jd-ph-icon-btn', title: 'Cookie设置' }, ['\u2699']);
+        var settingsBtn = el('button', { className: 'jd-ph-icon-btn', title: '设置' }, ['\u2699']);
         var header = el('div', { id: 'jd-ph-header' }, [
             el('div', { className: 'jd-ph-header-left' }, [
                 el('h3', null, ['历史价格走势']),
@@ -619,6 +711,9 @@
         document.body.appendChild(overlay);
         document.body.appendChild(panel);
         document.body.appendChild(btn);
+
+        applyBtnVisibility();
+        applyJdElevator();
 
         btn.addEventListener('click', togglePanel);
         overlay.addEventListener('click', closePanel);
@@ -887,7 +982,7 @@
      *  初始化
      * ============================================================ */
     function init() {
-        GM_registerMenuCommand('⚙ 设置慢慢买 Cookie', function() {
+        GM_registerMenuCommand('⚙ 设置', function() {
             showSettings();
         });
         if (!/item\.jd\.com\/\d+\.html/i.test(location.href)) return;
