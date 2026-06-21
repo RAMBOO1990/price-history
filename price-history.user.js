@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         历史价格 - 慢慢买查价
 // @namespace    https://github.com/ramboo1990/price-history
-// @version      1.2
+// @version      1.3
 // @description  商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
 // @match        https://item.jd.com/*
 // @match        https://detail.tmall.com/item.htm*
+// @match        https://item.taobao.com/item.htm*
 // @icon         https://www.jd.com/favicon.ico
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -54,22 +55,14 @@
         {
             name: '天猫',
             match: /detail\.tmall\.com\/item/i,
-            getCleanUrl: function () {
-                var url = location.href;
-                var m = url.match(/^https?:\/\/detail\.tmall\.com\/item[^?#]*/i);
-                if (!m) return url.replace(/[?#].*$/, '');
-                var base = m[0];
-                var q = url.indexOf('?');
-                if (q === -1) return base;
-                var params = url.substring(q + 1).split('&');
-                var keep = [];
-                for (var i = 0; i < params.length; i++) {
-                    var kv = params[i].split('=');
-                    if (kv[0] === 'id' || kv[0] === 'skuId') keep.push(params[i]);
-                }
-                return keep.length ? base + '?' + keep.join('&') : base;
-            },
+            getCleanUrl: function () { return keepIdAndSku(location.href); },
             icon: 'https://www.tmall.com/favicon.ico',
+        },
+        {
+            name: '淘宝',
+            match: /item\.taobao\.com\/item/i,
+            getCleanUrl: function () { return keepIdAndSku(location.href); },
+            icon: 'https://www.taobao.com/favicon.ico',
         },
     ];
     var currentPlatform = null;
@@ -182,10 +175,14 @@
                         },
                     }).then(function (apiRes) {
                         var ret = JSON.parse(apiRes.responseText);
-                        if (ret.code !== 0 || !ret.data || !ret.data.datePrice) {
+                        if (ret.code !== 0 || !ret.data) {
                             console.log('[ph] API 响应:', apiRes.responseText);
                             console.log('[ph] ticket:', ticket);
-                            throw { message: (ret.msg || '暂无价格数据') + ' (code=' + ret.code + ')', canRetry: true };
+                            throw { message: (ret.msg || '请求失败') + ' (code=' + ret.code + ')', canRetry: true };
+                        }
+                        if (!ret.data.datePrice) {
+                            console.log('[ph] 该商品暂未收录:', apiRes.responseText);
+                            return { notFound: true, message: '该商品暂未收录' };
                         }
                         console.log('[ph] 价格数据获取成功!');
                         console.log('[ph] 商品:', ret.data.spName);
@@ -235,6 +232,22 @@
             return currentPlatform.getCleanUrl();
         }
         return location.href.replace(/[?#].*$/, '');
+    }
+
+    // 通用：从 item.htm 类 URL 中仅保留 id 和 skuId 参数
+    function keepIdAndSku(url) {
+        var m = url.match(/^(https?:\/\/[^/]+\/item[^?#]*)/i);
+        if (!m) return url.replace(/[?#].*$/, '');
+        var base = m[1];
+        var q = url.indexOf('?');
+        if (q === -1) return base;
+        var params = url.substring(q + 1).split('&');
+        var keep = [];
+        for (var i = 0; i < params.length; i++) {
+            var key = params[i].split('=')[0];
+            if (key === 'id' || key === 'skuId') keep.push(params[i]);
+        }
+        return keep.length ? base + '?' + keep.join('&') : base;
     }
 
     /* ============================================================
@@ -1035,13 +1048,28 @@
     /* ============================================================
      *  数据获取与解析
      * ============================================================ */
+    function showInfo(msg) {
+        fetched = true;
+        isLoading = false;
+        bodyEl.innerHTML = '';
+        bodyEl.style.display = 'flex';
+        bodyEl.appendChild(el('div', { style: 'text-align:center;padding:40px 20px;color:#999;' }, [
+            el('div', { style: 'font-size:40px;margin-bottom:10px;color:#ddd;' }, ['\u2302']),
+            el('p', { style: 'font-size:14px;margin:0;' }, [msg]),
+        ]));
+    }
+
     function fetchChart() {
         if (!currentDataSource) { showError('未配置数据源', false); return; }
         showLoading();
         var url = getCleanUrl();
 
         currentDataSource.fetchData(url).then(function (result) {
-            showChart(result.data, result.meta);
+            if (result.notFound) {
+                showInfo(result.message || '该商品暂未收录');
+            } else {
+                showChart(result.data, result.meta);
+            }
         }).catch(function (err) {
             if (err.fallbackUrl) {
                 showFallback(err.fallbackUrl);
