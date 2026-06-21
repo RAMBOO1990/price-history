@@ -33,6 +33,9 @@
     };
 
     const MMB_COOKIE_KEY = 'jd-ph.mmb.cookie';
+    const MMB_SECRET_KEY = 'jd-ph.mmb.secret';
+    const MMB_SECRET_TIME_KEY = 'jd-ph.mmb.secret_time';
+    const MMB_SECRET_DEFAULT = 'c5c3f201a8e8fc634d37a766a0299218';
     const MMB_URL = 'https://tool.manmanbuy.com/HistoryLowest.aspx?url=';
 
     /* ============================================================
@@ -396,24 +399,78 @@
         return u;
     })();
 
-    var MMB_SECRET = 'c5c3f201a8e8fc634d37a766a0299218';
+    function getSecret() { return GM_getValue(MMB_SECRET_KEY, MMB_SECRET_DEFAULT); }
+    function setSecret(v) { GM_setValue(MMB_SECRET_KEY, v); GM_setValue(MMB_SECRET_TIME_KEY, Date.now()); }
 
     function generateToken(params) {
+        var secret = getSecret();
         var p = {};
         for (var k in params) p[k] = params[k];
         p.t = Date.now();
         var keys = Object.keys(p).sort();
-        var str = MMB_SECRET;
+        var str = secret;
         for (var i = 0; i < keys.length; i++) {
             var key = keys[i];
             if (p[key] != null && p[key] !== '') {
                 str += encodeURIComponent(key) + encodeURIComponent(p[key]);
             }
         }
-        str += MMB_SECRET;
+        str += secret;
         str = str.toUpperCase();
         p.token = md5(str);
         return p;
+    }
+
+    /* ============================================================
+     *  RC4 / 反混淆（用于从 customRequest.js 提取 secret）
+     * ============================================================ */
+    function rc4Decrypt(encoded, key) {
+        var raw = atob(encoded), urlEnc = '';
+        for (var i = 0; i < raw.length; i++) {
+            urlEnc += '%' + ('00' + raw.charCodeAt(i).toString(16)).slice(-2);
+        }
+        var str = decodeURIComponent(urlEnc);
+        var s = [], j = 0, t;
+        for (var i = 0; i < 256; i++) s[i] = i;
+        for (var i = 0; i < 256; i++) {
+            j = (j + s[i] + key.charCodeAt(i % key.length)) % 256;
+            t = s[i]; s[i] = s[j]; s[j] = t;
+        }
+        var result = '';
+        for (var i = 0, j = 0, k = 0; k < str.length; k++) {
+            i = (i + 1) % 256;
+            j = (j + s[i]) % 256;
+            t = s[i]; s[i] = s[j]; s[j] = t;
+            result += String.fromCharCode(str.charCodeAt(k) ^ s[(s[i] + s[j]) % 256]);
+        }
+        return result;
+    }
+
+    function deobfuscateCustomRequest(jsText) {
+        var m = jsText.match(/__0xa3e63\s*=\s*\[(.*?)\];/);
+        if (!m) throw new Error('无法解混淆: 未找到加密数组');
+        var rawElements = m[1].match(/'[^']*'/g);
+        if (!rawElements) throw new Error('无法解混淆: 数组元素为空');
+        var elements = rawElements.map(function(e) { return e.slice(1, -1); });
+        for (var i = 0; i < 476; i++) { elements.push(elements.shift()); }
+        return rc4Decrypt(elements[0], 'teCD');
+    }
+
+    function fetchSecret() {
+        return new Promise(function(resolve, reject) {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://mmbres.manmanbuy.com/pc_tool/customRequest.js',
+                onload: function(res) {
+                    try {
+                        var secret = deobfuscateCustomRequest(res.responseText);
+                        setSecret(secret);
+                        resolve(secret);
+                    } catch (e) { reject(e); }
+                },
+                onerror: function() { reject(new Error('请求 customRequest.js 失败')); },
+            });
+        });
     }
 
     /* ============================================================
@@ -446,6 +503,11 @@
                     el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-close-settings' }, ['取消']),
                 ]),
                 el('div', { className: 'jd-ph-settings-status', id: 'jd-ph-settings-status' }),
+                el('hr', { style: 'border:none;border-top:1px solid #eee;margin:14px 0 10px' }),
+                el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
+                    el('div', { id: 'jd-ph-secret-info', style: 'font-size:11px;color:#aaa;line-height:1.6' }),
+                    el('button', { className: 'jd-ph-btn-secondary', id: 'jd-ph-update-secret', style: 'font-size:11px;padding:4px 10px;flex-shrink:0' }, ['更新密钥']),
+                ]),
             ]);
             document.body.appendChild(settingsEl);
 
@@ -467,7 +529,33 @@
             });
 
             settingsEl.querySelector('#jd-ph-close-settings').addEventListener('click', hideSettings);
+
+            settingsEl.querySelector('#jd-ph-update-secret').addEventListener('click', function () {
+                var btn = this;
+                btn.textContent = '更新中...';
+                btn.disabled = true;
+                fetchSecret().then(function(secret) {
+                    showSettingsStatus('success', '密钥已更新');
+                    refreshSecretInfo();
+                    btn.textContent = '更新密钥';
+                    btn.disabled = false;
+                }).catch(function(err) {
+                    showSettingsStatus('error', '更新失败: ' + err.message);
+                    btn.textContent = '更新密钥';
+                    btn.disabled = false;
+                });
+            });
         }
+
+        function refreshSecretInfo() {
+            var secret = getSecret();
+            var time = GM_getValue(MMB_SECRET_TIME_KEY, 0);
+            var timeStr = time ? dateFormat(new Date(time), 'yyyy-MM-dd HH:mm') : '未知';
+            var infoEl = settingsEl.querySelector('#jd-ph-secret-info');
+            if (infoEl) infoEl.innerHTML = '密钥: ' + secret.substring(0, 16) + '...<br>更新: ' + timeStr;
+        }
+
+        refreshSecretInfo();
 
         var existing = getCookie();
         if (existing) {
