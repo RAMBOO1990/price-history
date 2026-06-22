@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         历史价格 - 慢慢买查价
 // @namespace    https://github.com/ramboo1990/price-history
-// @version      1.4
+// @version      1.5
 // @description  商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
 // @match        https://item.jd.com/*
@@ -375,12 +375,13 @@
 
         // ---- 价格信息 ----
         '.ph-price-info {',
-            'display:flex;justify-content:space-around;padding:10px 0 14px;',
-            'font-size:12px;color:#666;border-bottom:1px solid #f0f0f0;margin-bottom:10px;',
+            'display:flex;justify-content:space-around;padding:14px 0 16px;',
+            'color:#666;border-bottom:1px solid #f0f0f0;margin-bottom:10px;',
         '}',
-        '.ph-price-info .ph-price-item { text-align:center; }',
-        '.ph-price-info .ph-price-label { color:#999;margin-bottom:2px; }',
-        '.ph-price-info .ph-price-value { color:#333;font-weight:600;font-size:14px; }',
+        '.ph-price-info .ph-price-item { text-align:center;flex:1; }',
+        '.ph-price-info .ph-price-label { color:#999;margin-bottom:4px;font-size:12px; }',
+        '.ph-price-info .ph-price-value { color:#333;font-weight:700;font-size:20px; }',
+        '.ph-price-info .ph-price-value.current { color:#E4393C;font-size:24px; }',
         '.ph-price-info .ph-price-value.high { color:#E4393C; }',
         '.ph-price-info .ph-price-value.low { color:#28a745; }',
 
@@ -988,7 +989,7 @@
         // 价格摘要
         var prices = data.map(function(d) { return d[1]; });
         var infoHtml = '<div class="ph-price-info">';
-        infoHtml += '<div class="ph-price-item"><div class="ph-price-label">当前价</div><div class="ph-price-value">¥' + meta.current + '</div></div>';
+        infoHtml += '<div class="ph-price-item"><div class="ph-price-label">当前价</div><div class="ph-price-value current">¥' + meta.current + '</div></div>';
         infoHtml += '<div class="ph-price-item"><div class="ph-price-label">历史最低</div><div class="ph-price-value low">¥' + meta.lowest + '</div></div>';
         infoHtml += '<div class="ph-price-item"><div class="ph-price-label">最高</div><div class="ph-price-value high">¥' + meta.highest + '</div></div>';
         infoHtml += '</div>';
