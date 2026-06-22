@@ -56,12 +56,14 @@
             name: '天猫',
             match: /detail\.tmall\.com\/item/i,
             getCleanUrl: function () { return keepIdAndSku(location.href); },
+            elevatorSelector: '#J_Toolkit',
             icon: 'https://www.tmall.com/favicon.ico',
         },
         {
             name: '淘宝',
             match: /item\.taobao\.com\/item/i,
             getCleanUrl: function () { return keepIdAndSku(location.href); },
+            elevatorSelector: '#J_Toolkit',
             icon: 'https://www.taobao.com/favicon.ico',
         },
     ];
@@ -477,7 +479,7 @@
         '.ph-settings-row:last-child { border-bottom:none; }',
         '.ph-settings-row label { font-size:13px;color:#333;cursor:pointer; }',
 
-        // ---- 动态隐藏电梯 ----
+        // ---- 动态隐藏平台浮窗 ----
         '#ph-elevator-style { display:none; }',
 
     ].join('\n');
@@ -683,7 +685,7 @@
                         ]),
                     ]),
                     el('div', { className: 'ph-settings-row' }, [
-                        el('label', { htmlFor: 'ph-toggle-elevator' }, ['隐藏平台楼层导航']),
+                        el('label', { htmlFor: 'ph-toggle-elevator' }, ['隐藏平台右侧浮窗']),
                         el('label', { className: 'ph-switch' }, [
                             el('input', { type: 'checkbox', id: 'ph-toggle-elevator' }),
                             el('span', { className: 'ph-slider' }),
