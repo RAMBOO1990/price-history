@@ -36,6 +36,8 @@
 
     const BTN_HIDDEN_KEY = 'ph.btn.hidden';
     const ELEVATOR_HIDDEN_KEY = 'ph.elevator.hidden';
+    const AUTO_OPEN_KEY = 'ph.auto.open';
+    const PANEL_WIDTH_KEY = 'ph.panel.width';
 
     /* ============================================================
      *  平台配置
@@ -295,15 +297,18 @@
 
         // ---- 面板 ----
         '#ph-panel {',
-            'position:fixed;top:0;right:-' + CONFIG.panelWidth + 'px;',
-            'width:' + CONFIG.panelWidth + 'px;height:100%;',
+            'position:fixed;top:0;right:0;height:100%;',
             'background:#fff;z-index:999999;',
             'box-shadow:-4px 0 20px rgba(0,0,0,.15);',
             'transition:right ' + CONFIG.animDuration + 'ms ease;',
             'display:flex;flex-direction:column;',
             'font-family:"Microsoft YaHei","PingFang SC",sans-serif;',
         '}',
-        '#ph-panel.open { right:0; }',
+        '.ph-drag-handle {',
+            'position:absolute;top:0;left:-4px;width:8px;height:100%;',
+            'cursor:col-resize;z-index:1;',
+        '}',
+        '.ph-drag-handle:hover { background:rgba(228,57,60,0.08); }',
 
         // ---- 面板头部 ----
         '#ph-header {',
@@ -481,6 +486,14 @@
 
         // ---- 动态隐藏平台浮窗 ----
         '#ph-elevator-style { display:none; }',
+
+        // ---- 提示 Toast ----
+        '#ph-toast {',
+            'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;',
+            'background:rgba(0,0,0,0.75);color:#fff;padding:14px 28px;border-radius:8px;font-size:15px;',
+            'opacity:0;transition:opacity 0.3s;pointer-events:none;text-align:center;',
+        '}',
+        '#ph-toast.ph-toast-show { opacity:1; }',
 
     ].join('\n');
 
@@ -691,6 +704,13 @@
                             el('span', { className: 'ph-slider' }),
                         ]),
                     ]),
+                    el('div', { className: 'ph-settings-row' }, [
+                        el('label', { htmlFor: 'ph-toggle-auto' }, ['进入页面自动打开价格面板']),
+                        el('label', { className: 'ph-switch' }, [
+                            el('input', { type: 'checkbox', id: 'ph-toggle-auto' }),
+                            el('span', { className: 'ph-slider' }),
+                        ]),
+                    ]),
                 ]),
             ];
 
@@ -741,6 +761,9 @@
             settingsEl.querySelector('#ph-toggle-elevator').addEventListener('change', function () {
                 GM_setValue(ELEVATOR_HIDDEN_KEY, this.checked);
                 applyPlatformElevator();
+            });
+            settingsEl.querySelector('#ph-toggle-auto').addEventListener('change', function () {
+                GM_setValue(AUTO_OPEN_KEY, this.checked);
             });
             settingsEl.querySelector('#ph-settings-close').addEventListener('click', hideSettings);
 
@@ -806,6 +829,7 @@
 
         settingsEl.querySelector('#ph-toggle-btn').checked = GM_getValue(BTN_HIDDEN_KEY, false);
         settingsEl.querySelector('#ph-toggle-elevator').checked = GM_getValue(ELEVATOR_HIDDEN_KEY, false);
+        settingsEl.querySelector('#ph-toggle-auto').checked = GM_getValue(AUTO_OPEN_KEY, false);
 
         settingsEl.classList.add('open');
         if (overlay) overlay.classList.add('active');
@@ -831,6 +855,8 @@
     var isLoading = false;
     var cleanUrl = getCleanUrl();
     var currentData = null;  // 缓存的图表数据
+    var myChartInstance = null;  // ECharts 实例，用于 resize
+    var panelWidth = parseInt(GM_getValue(PANEL_WIDTH_KEY, '')) || CONFIG.panelWidth;
 
     /* ============================================================
      *  UI 构建
@@ -864,13 +890,39 @@
             ]),
         ]);
 
-        panel = el('div', { id: 'ph-panel' }, [header, bodyEl, footer]);
+        var dragHandle = el('div', { className: 'ph-drag-handle' });
+        panel = el('div', { id: 'ph-panel' }, [dragHandle, header, bodyEl, footer]);
+        panel.style.width = panelWidth + 'px';
+        panel.style.right = '-' + panelWidth + 'px';
         document.body.appendChild(overlay);
         document.body.appendChild(panel);
         document.body.appendChild(btn);
 
         applyBtnVisibility();
         applyPlatformElevator();
+
+        // 拖拽调整宽度
+        dragHandle.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            var startX = e.clientX;
+            var startW = panelWidth;
+            function onMove(ev) {
+                var newW = startW - (ev.clientX - startX);
+                if (newW < 300) newW = 300;
+                if (newW > window.innerWidth * 0.8) newW = Math.round(window.innerWidth * 0.8);
+                panelWidth = newW;
+                panel.style.width = newW + 'px';
+                if (!isOpen) panel.style.right = '-' + newW + 'px';
+                if (myChartInstance) myChartInstance.resize();
+            }
+            function onUp() {
+                GM_setValue(PANEL_WIDTH_KEY, String(panelWidth));
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
 
         btn.addEventListener('click', togglePanel);
         overlay.addEventListener('click', closePanel);
@@ -889,6 +941,7 @@
     function openPanel() {
         isOpen = true;
         overlay.classList.add('active');
+        panel.style.right = '0';
         panel.classList.add('open');
         // 没有 Cookie 时弹出设置
         if (!currentDataSource || !currentDataSource.getCookie()) {
@@ -903,6 +956,7 @@
     function closePanel() {
         isOpen = false;
         overlay.classList.remove('active');
+        panel.style.right = '-' + panelWidth + 'px';
         panel.classList.remove('open');
     }
 
@@ -942,7 +996,9 @@
         bodyEl.innerHTML = '<div class="ph-body-inner">' + infoHtml + '<div id="ph-chart-box"></div></div>';
 
         var chartDom = document.getElementById('ph-chart-box');
+        if (myChartInstance) myChartInstance.dispose();
         var myChart = echarts.init(chartDom);
+        myChartInstance = myChart;
 
         var maxPrice = Math.max.apply(null, prices);
         var minPrice = Math.min.apply(null, prices);
@@ -1061,6 +1117,22 @@
         ]));
     }
 
+    function showToast(msg, duration) {
+        duration = duration || 2000;
+        var toast = document.getElementById('ph-toast');
+        if (!toast) {
+            toast = el('div', { id: 'ph-toast' });
+            document.body.appendChild(toast);
+        }
+        toast.textContent = msg;
+        toast.className = 'ph-toast-show';
+        setTimeout(function () {
+            toast.className = '';
+        }, duration);
+    }
+
+    var autoOpenPending = false;
+
     function fetchChart() {
         if (!currentDataSource) { showError('未配置数据源', false); return; }
         showLoading();
@@ -1068,7 +1140,14 @@
 
         currentDataSource.fetchData(url).then(function (result) {
             if (result.notFound) {
-                showInfo(result.message || '该商品暂未收录');
+                if (autoOpenPending) {
+                    autoOpenPending = false;
+                    var msg = result.message || '该商品暂未收录';
+                    showToast(msg);
+                    closePanel();
+                } else {
+                    showInfo(result.message || '该商品暂未收录');
+                }
             } else {
                 showChart(result.data, result.meta);
             }
@@ -1100,6 +1179,10 @@
         // 默认使用第一个数据源
         if (DATASOURCES.length > 0) currentDataSource = DATASOURCES[0];
         buildUI();
+        if (GM_getValue(AUTO_OPEN_KEY, false)) {
+            autoOpenPending = true;
+            setTimeout(function () { openPanel(); }, 500);
+        }
     }
 
     if (document.readyState === 'loading') {
