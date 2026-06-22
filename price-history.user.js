@@ -56,14 +56,14 @@
             name: '天猫',
             match: /detail\.tmall\.com\/item/i,
             getCleanUrl: function () { return keepIdAndSku(location.href); },
-            elevatorSelector: '#J_Toolkit',
+            elevatorSelector: '#tb-toolkit-new',
             icon: 'https://www.tmall.com/favicon.ico',
         },
         {
             name: '淘宝',
             match: /item\.taobao\.com\/item/i,
             getCleanUrl: function () { return keepIdAndSku(location.href); },
-            elevatorSelector: '#J_Toolkit',
+            elevatorSelector: '#tb-toolkit-new',
             icon: 'https://www.taobao.com/favicon.ico',
         },
     ];
