@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         历史价格 - 慢慢买查价
 // @namespace    https://github.com/ramboo1990/price-history
-// @version      1.5
+// @version      1.6
 // @description  商品页展示历史价格曲线图（数据来源：慢慢买，需配置Cookie）
 // @author       R9
 // @match        https://item.jd.com/*
@@ -854,7 +854,7 @@
     var isOpen = false;
     var fetched = false;
     var isLoading = false;
-    var cleanUrl = getCleanUrl();
+    var fetchedUrl = getCleanUrl();
     var currentData = null;  // 缓存的图表数据
     var myChartInstance = null;  // ECharts 实例，用于 resize
     var panelWidth = parseInt(GM_getValue(PANEL_WIDTH_KEY, '')) || CONFIG.panelWidth;
@@ -951,6 +951,9 @@
         if (!currentDataSource || !currentDataSource.getCookie()) {
             showSettings();
             return;
+        }
+        if (fetched && getCleanUrl() !== fetchedUrl) {
+            fetched = false;
         }
         if (!fetched && !isLoading) {
             fetchChart();
@@ -1147,6 +1150,7 @@
         if (!currentDataSource) { showError('未配置数据源', false); return; }
         showLoading();
         var url = getCleanUrl();
+        fetchedUrl = url;
 
         currentDataSource.fetchData(url).then(function (result) {
             if (result.notFound) {

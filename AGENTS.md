@@ -86,6 +86,14 @@ ECharts 配置要点：
 
 当前使用 `https://cdn.jsdelivr.net/npm/echarts@5.3.0/dist/echarts.min.js`。如被墙需更换。
 
+### 面板刷新机制
+
+面板头部提供「刷新」按钮（↻），点击后强制按当前 URL 重新拉取并重绘。另在 `openPanel()` 中比对 `fetchedUrl`（上次拉取所用 URL）与 `getCleanUrl()` 实时结果，URL 变化则自动解除 `fetched` 缓存标志并重新拉取（支持站内跳转 SKU 场景）。
+
+- `fetched` — 是否已成功拉取一次，控制 `fetchChart()` 的自动调用
+- `fetchedUrl` — 上次拉取所用 URL，用于检测 URL 变化
+- `refreshChart()` — 手动刷新入口：`isLoading` 时忽略，否则重置 `fetched` 并调用 `fetchChart()`
+
 ## 密钥更新机制
 
 从 `https://mmbres.manmanbuy.com/pc_tool/customRequest.js` 在线提取：
@@ -97,7 +105,7 @@ ECharts 配置要点：
 
 ## 关键文件
 
-- `price-history.user.js` — 唯一源文件（~1020 行）
+- `price-history.user.js` — 唯一源文件（~1200 行）
 - `AGENTS.md` — 本文档
 
 ## 调试
