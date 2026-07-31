@@ -389,6 +389,19 @@
         '#ph-footer {',
             'padding:10px 16px;border-top:1px solid #eee;text-align:center;flex-shrink:0;',
         '}',
+        '#ph-footer .ph-url {',
+            'display:flex;align-items:center;gap:4px;margin-bottom:6px;',
+        '}',
+        '#ph-footer .ph-url a {',
+            'flex:1;color:#999;font-size:11px;text-decoration:none;',
+            'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+        '}',
+        '#ph-footer .ph-url a:hover { color:#666;text-decoration:underline; }',
+        '#ph-footer .ph-url .ph-copy-btn {',
+            'flex-shrink:0;border:none;background:none;color:#999;font-size:11px;',
+            'cursor:pointer;padding:0 4px;line-height:1;border-radius:3px;',
+        '}',
+        '#ph-footer .ph-url .ph-copy-btn:hover { background:#f5f5f5;color:' + CONFIG.color + '; }',
         '#ph-footer a {',
             'color:' + CONFIG.color + ';font-size:12px;text-decoration:none;',
         '}',
@@ -888,6 +901,7 @@
         var dsName = currentDataSource ? currentDataSource.name : '';
         var dsUrl = currentDataSource ? currentDataSource.homepageUrl : '#';
         var footer = el('div', { id: 'ph-footer' }, [
+            el('div', { id: 'ph-footer-url', className: 'ph-url', title: '当前商品链接' }),
             el('a', { href: dsUrl, target: '_blank', rel: 'noopener' }, [
                 '数据来源：' + dsName + ' \u2197'
             ]),
@@ -971,6 +985,44 @@
         if (isLoading) return;
         fetched = false;
         fetchChart();
+    }
+
+    function updateFooterUrl(url) {
+        var urlEl = document.getElementById('ph-footer-url');
+        if (!urlEl) return;
+        urlEl.innerHTML = '';
+        if (!url) { urlEl.textContent = ''; return; }
+        urlEl.appendChild(el('a', { href: url, target: '_blank', rel: 'noopener', title: url }, [url]));
+        var copyBtn = el('button', { className: 'ph-copy-btn', title: '复制链接', type: 'button' }, ['复制']);
+        copyBtn.addEventListener('click', function () {
+            copyToClipboard(url);
+        });
+        urlEl.appendChild(copyBtn);
+    }
+
+    function copyToClipboard(text) {
+        function fallback() {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                showToast('已复制链接');
+            } catch (e) {
+                showToast('复制失败');
+            }
+            document.body.removeChild(ta);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+                showToast('已复制链接');
+            }).catch(fallback);
+        } else {
+            fallback();
+        }
     }
 
     /* ============================================================
@@ -1151,6 +1203,7 @@
         showLoading();
         var url = getCleanUrl();
         fetchedUrl = url;
+        updateFooterUrl(url);
 
         currentDataSource.fetchData(url).then(function (result) {
             if (result.notFound) {
