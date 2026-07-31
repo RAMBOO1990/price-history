@@ -871,11 +871,13 @@
 
         var closeBtn = el('button', { className: 'ph-icon-btn', title: '关闭' }, ['\u00d7']);
         var settingsBtn = el('button', { className: 'ph-icon-btn', title: '设置' }, ['\u2699']);
+        var refreshBtn = el('button', { className: 'ph-icon-btn', title: '刷新历史价格' }, ['\u21bb']);
         var header = el('div', { id: 'ph-header' }, [
             el('div', { className: 'ph-header-left' }, [
                 el('h3', null, ['历史价格走势']),
             ]),
             el('div', { className: 'ph-header-actions' }, [
+                refreshBtn,
                 settingsBtn,
                 closeBtn,
             ]),
@@ -929,6 +931,7 @@
         overlay.addEventListener('click', closePanel);
         closeBtn.addEventListener('click', closePanel);
         settingsBtn.addEventListener('click', function() { showSettings(); });
+        refreshBtn.addEventListener('click', refreshChart);
     }
 
 
@@ -959,6 +962,12 @@
         overlay.classList.remove('active');
         panel.style.right = '-' + panelWidth + 'px';
         panel.classList.remove('open');
+    }
+
+    function refreshChart() {
+        if (isLoading) return;
+        fetched = false;
+        fetchChart();
     }
 
     /* ============================================================
